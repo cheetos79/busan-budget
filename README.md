@@ -12,7 +12,7 @@
 
 2 Firebase 설정 (관리자, 처음 한 번)
 
-가. https://console.firebase.google.com 에서 프로젝트를 만듦
+가. Firebase 콘솔(https://console.firebase.google.com)에서 프로젝트를 만듦
 나. Authentication > 로그인 방법에서 Google, 이메일/비밀번호를 사용 설정함
 다. Authentication > 설정 > 승인된 도메인에 이 사이트 주소의 도메인(예: 계정명.github.io)을 추가함
 라. Firestore Database를 만듦. 프로덕션 모드, 위치는 asia-northeast3(서울)을 권함

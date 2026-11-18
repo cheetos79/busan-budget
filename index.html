@@ -59,6 +59,7 @@ nav.tabs a[aria-current="page"] { color: var(--navy); border-bottom-color: var(-
 .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--s3); display: inline-block; }
 .pill.on i { background: #3A9A4A; } .pill.wait i { background: #D99A1E; } .pill.off i { background: var(--accent); }
 .main { max-width: 1320px; margin: 0 auto; padding-block: 18px 60px; }
+[hidden] { display: none !important; }
 .view { display: flex; flex-direction: column; gap: 18px; }
 .vhead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px; }
 h1, h2, h3 { margin: 0; text-wrap: balance; }
@@ -268,22 +269,70 @@ const GORD = { "매출": 0, "고정비": 1, "변동비": 2, "이익조정": 3, "
 
 function prepCfg(c) {
   const cfg = { acct: c.acct || [], rules: c.rules || [], std: c.std || [], thr: Object.assign({ amt: 500000, rate: 0.1 }, c.thr || {}), center: c.center || "" };
-  cfg.acctMap = Object.fromEntries(cfg.acct.filter(a => a.a).map(a => [a.a, a.i || ""]));
+  // 엑셀 VLOOKUP처럼 같은 계정이 두 번 있으면 위쪽(먼저 나온) 매핑을 씀
+  cfg.acctMap = {};
+  for (const a of cfg.acct) if (a.a && !Object.prototype.hasOwnProperty.call(cfg.acctMap, a.a)) cfg.acctMap[a.a] = a.i || "";
   return cfg;
 }
+// 엑셀 SEARCH와 같은 문구 검사(엑셀 16.0 COM으로 55가지 대조): 대소문자 무시, * = 아무 글자 여러 개, ? = 아무 글자 1개,
+// ~ 다음의 * ? ~ 는 그 글자 그대로, 그 밖의 ~ 는 버림("1~3월"은 "13월"을 찾음). 적요가 빈칸이면 어떤 문구도 못 찾음
+function excelSearch(pat, text) {
+  const p = String(pat), t = String(text);
+  if (t === "") return false;
+  if (!/[*?~]/.test(p)) return t.toLowerCase().includes(p.toLowerCase());
+  let re = "";
+  for (let i = 0; i < p.length; i++) {
+    const ch = p[i];
+    if (ch === "~") { if (i + 1 < p.length && /[*?~]/.test(p[i + 1])) re += "\\" + p[++i]; }
+    else if (ch === "*") re += "[\\s\\S]*";
+    else if (ch === "?") re += "[\\s\\S]";
+    else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(re, "i").test(t);
+}
 function classify(cfg, acct, memo, ovr) {
+  // 엑셀 분류식 첫 조건 IF(계정="","",...): 계정이 비면 직접지정이 있어도 결과는 빈칸(집계 안 됨)
+  // 직접지정까지 한 줄은 why를 '계정없음'으로 남겨 화면이 알릴 수 있게 함(건수·금액은 buildAgg의 bst.noAcct, noAcctAmt)
+  if (!acct) return { item: "", why: ovr ? "계정없음" : "" };
   if (ovr) return { item: ovr, why: "직접지정" };
-  if (!acct) return { item: "", why: "" };
-  const t = String(memo || "").toLowerCase(); let hit = null;
-  for (const r of cfg.rules) if (r.a === acct && r.p && t.includes(String(r.p).toLowerCase())) hit = r;
+  const t = String(memo == null ? "" : memo); let hit = null;
+  for (const r of cfg.rules) if (r.a === acct && r.p && excelSearch(r.p, t)) hit = r;
   if (hit) return { item: hit.i, why: "문구규칙", rule: hit.p };
-  const d = cfg.acctMap[acct];
+  const d = Object.prototype.hasOwnProperty.call(cfg.acctMap, acct) ? cfg.acctMap[acct] : "";
   if (d) return { item: d, why: "계정" };
   return { item: "미분류", why: "미분류" };
 }
 function groupOf(item) { return ITEM[item] ? ITEM[item].g : (item || ""); }
 function parseNum(v) { if (v === "" || v == null) return 0; if (typeof v === "number") return isFinite(v) ? v : NaN; let t = String(v).trim().replace(/[,\s원₩]/g, "").replace(/[－−]/g, "-"); if (!t) return 0; let neg = false; if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); } if (/^[△▲]/.test(t)) { neg = true; t = t.slice(1); } if (/-$/.test(t) && !/^-/.test(t)) { neg = true; t = t.slice(0, -1); } if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(t)) return NaN; const x = Number(t); return neg ? -Math.abs(x) : x; }
-function num(v) { if (v === "" || v == null) return 0; const x = Number(String(v).replace(/[,\s원]/g, "")); return isFinite(x) ? x : 0; }
+// ===== 숫자 읽기 =====
+// num: 예산 칸(budgetAmt), 매출·원장외 금액, 저장된 원장 금액(ledgerAmt)에 씀. 화면 코드도 같은 칸을 num으로 읽음
+//   (예산 엑셀 내보내기 app_tpl.html 1114행, 전월 예산 불러오기 659행, 매출 저장 762행). 그래서 예산 칸만 다른 규칙으로 읽으면 안 됨
+// parseAmt: 원장 붙여넣기·xlsx 금액(원본 규칙 + 회계 음수 표시)
+// 전각 숫자·쉼표·마침표·괄호·빼기(０-９ ， ． （ ） －)는 보통 글자로 바꿈. 엑셀도 같은 값으로 받음
+const halfW = s => String(s).replace(/[０-９，．（）－]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+// readNum: 화면의 저장 전 검사(parseNum)와 같은 규칙(유한수 검사와 전각 글자, ￦ \ 처리만 더함). num·parseAmt가 원본 식으로 못 읽은 값에만 씀
+// 쉼표·공백·원·통화 기호(₩ ￦ \)를 지우고 수학 빼기(−)는 - 로 봄. (1,000) / △1,000 / ▲1,000 / 1,000- 는 음수. "-" 하나는 0. 못 읽는 값은 NaN
+function readNum(v) {
+  if (typeof v === "number") return isFinite(v) ? v : NaN;
+  if (v == null) return NaN;
+  let s = halfW(v).replace(/[,\s원₩￦\\]/g, "").replace(/−/g, "-"), neg = false;
+  if (s === "") return NaN;
+  if (s === "-") return 0;
+  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  if (/^[△▲]/.test(s)) { neg = true; s = s.slice(1); }
+  if (/-$/.test(s) && !/^-/.test(s)) { neg = true; s = s.slice(0, -1); }
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s)) return NaN;
+  const x = Number(s);
+  return isFinite(x) ? (neg ? -Math.abs(x) : x) : NaN;
+}
+// num: 원본 식(쉼표·공백·원을 지우고 Number)이 유한수를 내면 그 값을 그대로 씀. 그래서 원본이 읽던 값은 바뀌지 않음
+// 원본이 0으로 읽던 값만 readNum으로 다시 읽음. 화면 parseNum이 통과시킨 매출·원장외 금액은 parseNum과 같은 숫자로 저장됨
+function num(v) {
+  if (v === "" || v == null) return 0;
+  const x = Number(String(v).replace(/[,\s원]/g, ""));
+  if (isFinite(x)) return x;
+  const y = readNum(v); return isNaN(y) ? 0 : y;
+}
 function hasVal(v) { return v !== "" && v != null && String(v).trim() !== ""; }
 function budgetAmt(l) { return hasVal(l.direct) ? num(l.direct) : num(l.qty) * num(l.price); }
 function ledgerAmt(l) { return num(l.dr) - num(l.cr); }
@@ -297,11 +346,14 @@ function buildAgg(cfg, B, L, A) {
   const bud = {}, act = {}, bst = {}, lst = {};
   const add = (o, k, it, v) => { (o[k] = o[k] || {}); o[k][it] = (o[k][it] || 0) + v; };
   for (const [k, doc] of Object.entries(B || {})) {
-    const s = bst[k] = { n: 0, unc: 0, uncAmt: 0, exc: 0 };
+    const s = bst[k] = { n: 0, unc: 0, uncAmt: 0, exc: 0, noAcct: 0, noAcctAmt: 0 };
     for (const l of (doc && doc.lines) || []) {
       if (!l.acct && !l.ovr) continue;
       const c = classify(cfg, l.acct, l.memo, l.ovr), v = budgetAmt(l);
       if (v !== 0) s.n++;
+      if (v !== 0) s.n++;
+      // 엑셀: 계정이 빈 줄은 예산금액이 빈칸이라 실적표에 안 들어감. 직접지정만 하고 계정을 비운 줄의 건수·금액은 따로 셈(화면 경고용)
+      if (!l.acct) { s.noAcct++; s.noAcctAmt += v; continue; }
       if (c.item === "미분류") { s.unc++; s.uncAmt += v; } else if (c.item === "제외") s.exc += v;
       add(bud, k, c.item, v);
     }
@@ -624,9 +676,9 @@ function loadBudgetDraft(ymk) {
   U.bd = { ym: ymk, lines: doc ? clone(doc.lines || []).map(l => ({ id: l.id || uidStr(), ...l })) : [], baseRev: doc ? (doc.rev || 0) : 0, dirty: false, conflict: false };
 }
 function budgetSummary(lines) {
-  const g = { 매출: 0, 고정비: 0, 변동비: 0, 이익조정: 0 }; let unc = 0, n = 0;
-  for (const l of lines) { if (!l.acct && !l.ovr) continue; const c = classify(S.cfg, l.acct, l.memo, l.ovr), v = budgetAmt(l), gr = groupOf(c.item); if (v) n++; if (gr in g) g[gr] += v; if (c.item === "미분류") unc++; }
-  return { ...g, op: g.매출 - g.고정비 - g.변동비, unc, n };
+  const g = { 매출: 0, 고정비: 0, 변동비: 0, 이익조정: 0 }; let unc = 0, n = 0, noAcct = 0, noAcctAmt = 0;
+  for (const l of lines) { if (!l.acct && !l.ovr) continue; const c = classify(S.cfg, l.acct, l.memo, l.ovr), v = budgetAmt(l), gr = groupOf(c.item); if (v) n++; if (!l.acct) { noAcct++; noAcctAmt += v; continue; } if (gr in g) g[gr] += v; if (c.item === "미분류") unc++; }
+  return { ...g, op: g.매출 - g.고정비 - g.변동비, unc, n, noAcct, noAcctAmt };
 }
 function renderBudget(el) {
   if (!U.bym) U.bym = ymAdd(curYm(), 1);
@@ -648,6 +700,7 @@ function renderBudget(el) {
   </div>
   ${bd.conflict ? `<div class="banner bad"><span>다른 사람이 이 달 예산을 먼저 저장함. 최신 내용을 불러오거나 내 입력으로 덮어씀</span><button class="btn sm" id="bReload">최신 불러오기</button><button class="btn sm warn" id="bForce">내 입력으로 덮어쓰기</button></div>` : ""}
   ${bd.dirty ? `<div class="banner"><span>저장하지 않은 변경이 있음</span></div>` : ""}
+  ${sm.noAcct ? `<div class="banner bad"><span>더존 계정 없이 항목만 고른 줄 ${sm.noAcct}개(${won(sm.noAcctAmt)}원)는 엑셀 양식과 같이 실적표 예산에 들어가지 않음. 계정을 채워야 함</span></div>` : ""}
   <div class="toolbar">
     <button class="btn" id="bAdd" ${can ? "" : "disabled"}>줄 추가</button>
     <button class="btn" id="bStd" ${can ? "" : "disabled"}>기본 목록 불러오기</button>
@@ -776,31 +829,98 @@ function renderActual(el) {
 }
 function defaultAdjLines() { return [...REV, "4대보험", "퇴직충당금", "리스회계 인식", "이익조정(배분)"].map(i => ({ item: i, amt: "", src: REV.includes(i) ? "손익계산서 학원매출" : "", note: "" })); }
 function normDate(v) {
-  if (v instanceof Date && !isNaN(v)) return ym(v.getFullYear(), v.getMonth() + 1) + "-" + String(v.getDate()).padStart(2, "0");
+  // xlsx 업로드: SheetJS 0.18.5(cellDates)는 1899년 시간대 오프셋을 분 단위 정수로 돌려주는 JS 엔진(node 24.20, V8 13.6에서 확인)에서
+  // 2026-01-15를 2026-01-14 23:59:08로 돌려줌(서울 1899년 지방시 +8:27:52의 52초가 빠짐). 오차는 1분 미만이므로 23:59:00 이후만 다음 날 0시로 올림
+  // (Chromium 156은 오프셋을 소수로 돌려줘 0시 정각이 오고, 이 보정은 아무것도 바꾸지 않음)
+  if (v instanceof Date && !isNaN(v)) { const x = new Date(v.getTime()); if (x.getHours() === 23 && x.getMinutes() === 59) x.setHours(24, 0, 0, 0); return ym(x.getFullYear(), x.getMonth() + 1) + "-" + String(x.getDate()).padStart(2, "0"); }
   if (typeof v === "number" && v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 86400000)); return ym(d.getUTCFullYear(), d.getUTCMonth() + 1) + "-" + String(d.getUTCDate()).padStart(2, "0"); }
-  const s = String(v || "").trim(); const mm = s.match(/(\d{4})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})/); if (mm) return `${mm[1]}-${mm[2].padStart(2, "0")}-${mm[3].padStart(2, "0")}`;
-  const m2 = s.match(/^(\d{1,2})[-./](\d{1,2})$/); if (m2) return `?-${m2[1].padStart(2, "0")}-${m2[2].padStart(2, "0")}`;
+  const s = String(v ?? "").trim();
+  const mm = s.match(/(\d{4})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})/) || s.match(/^(\d{4})(\d{2})(\d{2})$/); // 2026-01-15, 2026.1.15, 20260115
+  if (mm) return ymdOk(+mm[1], +mm[2], +mm[3]) ? `${mm[1]}-${mm[2].padStart(2, "0")}-${mm[3].padStart(2, "0")}` : "";
+  const m2 = s.match(/^(\d{1,2})[-./](\d{1,2})$/); if (m2) return ymdOk(2000, +m2[1], +m2[2]) ? `?-${m2[1].padStart(2, "0")}-${m2[2].padStart(2, "0")}` : "";
   return "";
 }
-function parseAmt(v) { if (typeof v === "number") return v; let s = String(v || "").trim(); if (!s) return 0; const neg = /^\(.*\)$/.test(s) || s.startsWith("△") || s.startsWith("-"); s = s.replace(/[(),△\-\s원]/g, ""); const x = Number(s); return isFinite(x) ? (neg ? -x : x) : 0; }
+// 있는 날짜인지 확인(13월, 2월 30일 같은 값은 날짜로 보지 않음)
+function ymdOk(y, m, d) { return m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate(); }
+
+// 원장 금액(붙여넣기·xlsx). 원본 규칙(괄호·△·앞의 - 는 음수, 쉼표·공백·원·괄호·△·- 를 지우고 Number)을 그대로 쓰고 두 가지만 바꿈
+//   숫자 바로 뒤에 붙은 - (1,000-)는 음수 표시로 봄(원본은 +1,000). 숫자 사이에 - 가 든 값(2026-01-31, 5-00)은 숫자가 아님(원본은 20,260,131처럼 이어 붙임)
+// 원본 규칙이 0이나 무한대를 내는 값(₩ ￦ ▲ − － 전각 숫자, 1e400 등)은 num 규칙으로 다시 읽음
+// 엑셀은 △ ▲ 와 뒤에 붙은 - 를 글자로 받아 0이지만, 원장은 더존 출력이라 원본처럼 회계 의미(음수)로 읽음(검토 문서 7.1의 1번)
+function parseAmt(v) {
+  if (typeof v === "number") return isFinite(v) ? v : 0;
+  const s = String(v ?? "").trim(); if (!s) return 0;
+  if (/\d\s*-.*\d/.test(s)) return 0;
+  const neg = /\d\s*-[\s)\-]*$/.test(s) || /^\(.*\)$/.test(s) || s.startsWith("△") || s.startsWith("-");
+  const x = Number(s.replace(/[(),△\-\s원]/g, ""));
+  if (isFinite(x) && x !== 0) return neg ? -x : x;
+  return num(s);
+}
+
+// 집계 행 판별
+// SUM_WORD: 원본 규칙의 집계 글자(계정+적요에 이 글자가 있으면 집계 행 후보)
+// SUM_OK: 집계 글자가 들어 있지만 집계 행이 아닌 회계 용어. 원본이 빼던 줄 중 다시 살리는 것은 집계 글자가 모두 이 용어 안에 있는 줄뿐임
+//   여기 없는 말(이월분, 누계분, 이월잔고 등)이 든 줄은 원본처럼 집계 행으로 빼고 sumRows에 남김
+// SUM_PART: 집계 이름에 쓰이는 말. 집계 말(계, 누계, 합계, 이월 등)과 날짜·기간 말(숫자, 년, 월, 일, 당월, 당기, 전기, 잔액, 액, 금 등)
+// isSumText(c, acct): 칸 글자가 '집계 이름뿐'인지. 공백·괄호·기호와 계정명을 지운 뒤 SUM_PART를 다 지웠을 때 남는 글자가 없으면 집계 이름
+//   예: "[ 월   계 ]", "2026년 1월 합계", "누계(당기)", "전월이월액", "월계 (2026.01)". "1월 계약금"은 아님
+// hasSumLabel(c, acct): 칸 전체가 집계 이름이거나, 칸 안의 괄호([ ], ( ), < >) 하나가 집계 이름임. 예: "[ 월   계 ] 부산재수"
+const SUM_WORD = /월계|누계|이월|합계|소계/;
+const SUM_OK = /합계표|합계잔액시산표|이월결손금|월계동|월계수/g; // 세금계산서합계표, 계산서합계표, 합계잔액시산표, 이월결손금, 월계동(지명), 월계수
+const SUM_PART = /상반기|하반기|반기|분기|당월|당기|전기|전월|차기|차월|금월|익월|잔액|금액|총합계|합계|총계|소계|누계|이월|[0-9년월일액계금]/g;
+const keepWord = x => String(x).replace(/[^0-9A-Za-z가-힣]/g, "");
+function isSumText(c, acct) {
+  if (typeof c !== "string") return false;
+  let t = keepWord(c); const an = acct ? keepWord(acct) : "";
+  if (an) t = t.split(an).join("");
+  return t !== "" && /계|이월/.test(t) && t.replace(SUM_PART, "") === "";
+}
+function hasSumLabel(c, acct) {
+  if (typeof c !== "string") return false;
+  return isSumText(c, acct) || (c.match(/\[[^\]]*\]|\([^)]*\)|<[^>]*>/g) || []).some(p => isSumText(p, acct));
+}
+// 계정명 앞뒤의 숫자 계정 코드를 뗌: "81100 복리후생비(학원)", "[81400]통신비", "통신비(81400)" → 계정명만
+function cleanAcct(s) { const x = s.replace(/^[\[(]?\d{3,7}[\])]?[\s.:-]*/, "").replace(/\s*[\[(]\d{3,7}[\])]$/, "").trim(); return x || s; }
+
 function parseRows(rows) {
   rows = rows.filter(r => r && r.some(c => String(c).trim() !== ""));
-  let hi = rows.findIndex(r => r.some(c => /계정/.test(String(c))) && r.some(c => /적요/.test(String(c))));
+  // 머리글 줄: 띄어쓰기를 지우고 '계정'과 '적요' 칸이 있으며, 날짜로 읽히는 칸이 없는 줄("계 정 명", "적    요"도 머리글로 봄. 거래 줄은 머리글로 잡지 않음)
+  const hk = c => String(c).replace(/\s/g, "");
+  const isHead = r => r.some(c => /계정/.test(hk(c))) && r.some(c => /적요/.test(hk(c))) && !r.some(c => normDate(c) !== "");
+  let hi = rows.findIndex(isHead);
   let col = { a: 0, d: 1, m: 2, dr: 3, c: 4, cr: -1 };
-  if (hi >= 0) { const h = rows[hi].map(c => String(c).replace(/\s/g, "")); const f = re => h.findIndex(x => re.test(x)); col = { a: f(/^계정(명|과목)?$|계정명/), d: f(/일자|날짜|회계일/), m: f(/적요/), dr: f(/차변/), cr: f(/대변/), c: f(/비용센터|관리항목|부서|프로젝트/) }; if (col.a < 0) col.a = 0; }
-  const body = hi >= 0 ? rows.slice(hi + 1) : rows;
-  const out = [], skipped = { sum: 0, misc: 0, nodate: 0 };
+  if (hi >= 0) { const h = rows[hi].map(hk); const f = re => h.findIndex(x => re.test(x)); const pick = (...ix) => ix.find(i => i >= 0) ?? -1; col = { a: f(/^계정(명|과목)?$|계정명/), d: pick(f(/회계일/), f(/전표일/), f(/^(일자|날짜)$/), f(/일자|날짜/)), m: f(/적요/), dr: f(/차변/), cr: f(/대변/), c: pick(f(/비용센터/), f(/관리항목2/), f(/비용센터|관리항목|부서|프로젝트/)) }; if (col.a < 0) col.a = 0; }
+  // 날짜 열: '회계일자' 열(엑셀 연월키 기준), 없으면 '전표일자', 없으면 이름이 '일자'·'날짜'인 열, 없으면 원래 규칙(일자·날짜가 든 첫 열). 증빙일자 열이 앞에 있어도 회계일자를 씀
+  // 비용센터 열: '비용센터' 열, 없으면 '관리항목2' 열(엑셀 안내의 더존 조회 기준), 없으면 원래 규칙(관리항목·부서·프로젝트 중 첫 열)
+  // 첫 머리글 줄 위의 줄: 제목(계정별원장, 회사명, 기간)일 수도 있고, 데이터 줄부터 고른 복사에서 페이지마다 다시 찍힌 머리글 위의 거래일 수도 있음
+  //   머리글의 열 배치로 읽어 회계일자와 금액(차변 또는 대변)이 있는 줄은 아래 줄과 같이 처리하고, 나머지는 원본처럼 버리되 skipped.pre에 셈
+  // 첫 머리글 아래에서 다시 나온 머리글 줄은 거래가 아니므로 skipped.head에 세고 건너뜀(그 줄의 '계정명' 글자를 계정으로 이어받지 않음)
+  // 그래서 빈 줄을 뺀 모든 줄이 lines 또는 skipped의 한 곳에 들어감: 줄 수 = lines + sum + misc + nodate + pre + head + (머리글이 있으면 1)
+  const out = [], skipped = { sum: 0, misc: 0, nodate: 0, pre: 0, head: 0 }, sumRows = [];
   let lastAcct = "";
-  for (const r of body) {
-    const g = i => i >= 0 ? r[i] : "";
-    let a = String(g(col.a) ?? "").trim(); const m = String(g(col.m) ?? "").trim();
-    if (/월계|누계|이월|합계|소계/.test(a + " " + m)) { skipped.sum++; continue; }
+  for (let ri = 0; ri < rows.length; ri++) {
+    if (ri === hi) continue;
+    const r = rows[ri], g = i => i >= 0 ? r[i] : "";
+    if (ri < hi && !(normDate(g(col.d)) && (parseAmt(g(col.dr)) !== 0 || (col.cr >= 0 && parseAmt(g(col.cr)) !== 0)))) { skipped.pre++; continue; }
+    if (ri > hi && hi >= 0 && isHead(r)) { skipped.head++; continue; }
+    let a = cleanAcct(String(g(col.a) ?? "").trim()); const m = String(g(col.m) ?? "").trim();
+    const d = normDate(g(col.d)), ea = a || lastAcct;
+    // 집계 행은 건너뜀(skipped.sum, sumRows): (1) 어느 칸이든 집계 이름이 있음(hasSumLabel), 또는
+    // (2) 원본 규칙(계정+적요에 SUM_WORD)에 걸리고, 날짜가 없거나 SUM_OK 용어를 지운 뒤에도 SUM_WORD가 남음
+    // 그래서 원본이 빼던 줄 중 수정본이 넣는 줄은 '날짜가 있고 집계 글자가 모두 SUM_OK 용어 안에 있는 줄'뿐임. 계정 칸이 비어도 같음
+    // 집계 행의 계정 칸에 진짜 계정명이 있으면(예: 전기이월 줄에만 계정명) 아래 줄이 이어받게 기억함
+    const aSum = isSumText(a), am = a + " " + m;
+    if (aSum || r.some((c, i) => i !== col.a && hasSumLabel(c, ea)) || (SUM_WORD.test(am) && (!d || SUM_WORD.test(am.replace(SUM_OK, " "))))) {
+      if (a && !aSum && !SUM_WORD.test(a)) lastAcct = a;
+      skipped.sum++; sumRows.push({ d, a, m, amt: parseAmt(g(col.dr)) - (col.cr >= 0 ? parseAmt(g(col.cr)) : 0) }); continue;
+    }
     if (!a) a = lastAcct; else lastAcct = a;
     if (/잡손실|잡이익/.test(a)) { skipped.misc++; continue; }
-    const d = normDate(g(col.d)); if (!d || !a) { skipped.nodate++; continue; }
+    if (!d || !a) { skipped.nodate++; continue; }
     out.push({ d, a, m, dr: parseAmt(g(col.dr)), cr: col.cr >= 0 ? parseAmt(g(col.cr)) : 0, c: String(g(col.c) ?? "").trim(), ovr: "" });
   }
-  return { lines: out, skipped, header: hi >= 0 };
+  // sumRows: 집계 행으로 보고 뺀 줄 목록(날짜, 계정, 적요, 금액). '전월 이월분 정산', '이월 수강생 간식'처럼 집계 글자가 든 정상 거래도 여기 들어오므로 화면에서 보여 줄 수 있게 돌려줌
+  return { lines: out, skipped, header: hi >= 0, sumRows };
 }
 function setImport(res, fname) {
   const cnt = {}; res.lines.forEach(l => { const k = l.d.startsWith("?") ? "연도 없음" : l.d.slice(0, 7); cnt[k] = (cnt[k] || 0) + 1; });
@@ -808,14 +928,16 @@ function setImport(res, fname) {
   U.imp = { ...res, fname: fname || "", target: top ? top[0] : U.aym, cnt, dropOther: true };
   render();
 }
-function impLines(imp) { return imp.lines.map(l => l.d.startsWith("?") ? { ...l, d: imp.target.slice(0, 4) + l.d.slice(1) } : l).filter(l => l.d.slice(0, 7) === imp.target).filter(l => !imp.dropOther || !S.cfg.center || !l.c || l.c === S.cfg.center); }
+// 연도 없는 날짜("?-02-29")는 대상 연도를 붙인 뒤 다시 검사해 없는 날짜(2026-02-29)는 남기지 않음(화면 미리보기의 '읽은 줄'과 '저장될 줄' 차이로 보임)
+function impLines(imp) { return imp.lines.map(l => l.d.startsWith("?") ? { ...l, d: imp.target.slice(0, 4) + l.d.slice(1) } : l).filter(l => l.d.slice(0, 7) === imp.target && ymdOk(+l.d.slice(0, 4), +l.d.slice(5, 7), +l.d.slice(8, 10))).filter(l => !imp.dropOther || !S.cfg.center || !l.c || l.c === S.cfg.center); }
 function importPreview(imp) {
   const ls = impLines(imp), tot = ls.reduce((s, l) => s + ledgerAmt(l), 0);
   const unc = ls.filter(l => classify(S.cfg, l.a, l.m, "").item === "미분류");
   const other = imp.lines.filter(l => l.d.slice(0, 7) === imp.target && S.cfg.center && l.c && l.c !== S.cfg.center).length;
   const months = Object.entries(imp.cnt).map(([k, n]) => `${k} ${n}줄`).join(", ");
   return `<div class="banner info" style="flex-direction:column;align-items:stretch">
-    <div><b>읽은 결과${imp.fname ? ` (${esc(imp.fname)})` : ""}</b>: ${imp.lines.length}줄 (${esc(months)}) | 뺀 행: 월계/누계 ${imp.skipped.sum}, 잡손실/잡이익 ${imp.skipped.misc}, 날짜 없음 ${imp.skipped.nodate} | 머리글 ${imp.header ? "인식함" : "없음(A~E열 순서로 읽음)"}</div>
+    <div><b>읽은 결과${imp.fname ? ` (${esc(imp.fname)})` : ""}</b>: ${imp.lines.length}줄 (${esc(months)}) | 뺀 행: 월계/누계 ${imp.skipped.sum}, 잡손실/잡이익 ${imp.skipped.misc}, 날짜 없음 ${imp.skipped.nodate}${imp.skipped.pre ? `, 머리글 위 제목 ${imp.skipped.pre}` : ""}${imp.skipped.head ? `, 반복 머리글 ${imp.skipped.head}` : ""} | 머리글 ${imp.header ? "인식함" : "없음(A~E열 순서로 읽음)"}</div>
+    ${(imp.sumRows || []).length ? `<div class="note">월계/누계로 보고 뺀 줄(정상 거래가 섞였는지 확인): ${imp.sumRows.slice(0, 6).map(r => esc([r.d, r.a, r.m, won(r.amt)].filter(Boolean).join(" "))).join(" / ")}${imp.sumRows.length > 6 ? ` 외 ${imp.sumRows.length - 6}줄` : ""}</div>` : ""}
     <div class="toolbar"><label for="impTarget">저장할 연월</label><select id="impTarget">${ymOptions(imp.target)}</select>
       <label><input type="checkbox" id="impDrop" ${imp.dropOther ? "checked" : ""}> 다른 비용센터 행 빼기(${other}줄)</label></div>
     <div>${esc(imp.target)}에 저장될 줄: <b>${ls.length}줄</b>, 합계 <b>${won(tot)}원</b>, 미분류 <b class="${unc.length ? "neg" : ""}">${unc.length}줄</b>${unc.length ? ` (${esc([...new Set(unc.map(l => l.a))].slice(0, 6).join(", "))})` : ""}</div>
@@ -1070,7 +1192,7 @@ function renderRules(el) {
     <div class="panel"><span class="cap">2 더존 계정 기본 매핑 (${src.acct.length}개)</span>
       <div class="tbl tall"><table><thead><tr><th>더존 계정</th><th>기본 실적표 항목</th><th>구분</th><th>비고</th>${ed ? "<th></th>" : ""}</tr></thead><tbody>${src.acct.map((a, i) => `<tr><td>${inp("acct", i, "a", a.a)}</td><td>${isel("acct", i, "i", a.i)}</td><td>${chip(a.i ? groupOf(a.i) : "")}</td><td class="wrap">${inp("acct", i, "note", a.note || "")}</td>${ed ? `<td><button class="btn sm" data-del="acct" data-i="${i}">삭제</button></td>` : ""}</tr>`).join("")}</tbody></table></div>
       ${ed ? `<button class="btn" data-add="acct">계정 추가</button>` : ""}</div>
-    <div class="panel"><span class="cap">3 적요 문구 규칙 (${src.rules.length}개, 아래쪽 규칙 우선)</span><span class="note">문구는 글자 그대로 찾음. 엑셀처럼 * ? ~ 를 와일드카드로 쓰지 않음</span>
+    <div class="panel"><span class="cap">3 적요 문구 규칙 (${src.rules.length}개, 아래쪽 규칙 우선)</span><span class="note">엑셀과 같이 * 는 아무 글자 여러 개, ? 는 아무 글자 1개로 찾음. * ? ~ 자체를 찾으려면 앞에 ~ 를 붙임(~*, ~?, ~~)</span>
       <div class="tbl tall"><table><thead><tr><th>더존 계정</th><th>적요 포함 문구</th><th>실적표 항목</th>${ed ? "<th></th>" : ""}</tr></thead><tbody>${src.rules.map((r, i) => `<tr><td>${inp("rules", i, "a", r.a)}</td><td>${inp("rules", i, "p", r.p)}</td><td>${isel("rules", i, "i", r.i)}</td>${ed ? `<td><button class="btn sm" data-del="rules" data-i="${i}">삭제</button></td>` : ""}</tr>`).join("")}</tbody></table></div>
       ${ed ? `<button class="btn" data-add="rules">규칙 추가</button>` : ""}</div>
   </div>
