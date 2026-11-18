@@ -1,0 +1,28 @@
+rules_version = '2';
+// 부산대성 예산실적 관리: Firestore 보안 규칙
+// members/{이메일} 문서가 있는 사람만 읽고, role이 admin 또는 editor인 사람만 예산과 실적을 씀
+// 기준정보(config)와 구성원(members)은 admin만 바꿈. 이메일 인증을 마친 계정만 인정함
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null && request.auth.token.email != null && request.auth.token.email_verified == true; }
+    function me() { return request.auth.token.email.lower(); }
+    function member() { return signedIn() && exists(/databases/$(database)/documents/members/$(me())); }
+    function role() { return get(/databases/$(database)/documents/members/$(me())).data.role; }
+    function writer() { return member() && role() in ['admin', 'editor']; }
+    function admin() { return member() && role() == 'admin'; }
+    function dataCol(c) { return c in ['budget', 'ledger', 'adjust', 'reasons', 'ai']; }
+
+    match /members/{email} {
+      allow read: if member();
+      allow write: if admin();
+    }
+    match /config/{doc} {
+      allow read: if member();
+      allow write: if admin();
+    }
+    match /{col}/{doc} {
+      allow read: if dataCol(col) && member();
+      allow write: if dataCol(col) && writer();
+    }
+  }
+}
