@@ -268,7 +268,7 @@ const TOTALS = new Set(["매출액", "판매비와 일반관리비", "영업이�
 const GORD = { "매출": 0, "고정비": 1, "변동비": 2, "이익조정": 3, "미분류": 4, "제외": 5 };
 
 function prepCfg(c) {
-  const cfg = { acct: c.acct || [], rules: c.rules || [], std: c.std || [], thr: Object.assign({ amt: 500000, rate: 0.1 }, c.thr || {}), center: c.center || "" };
+  const cfg = { acct: c.acct || [], rules: c.rules || [], std: (c.std || []).map(s => Array.isArray(s) ? s : [(s && s.a) || "", (s && s.t) || ""]), thr: Object.assign({ amt: 500000, rate: 0.1 }, c.thr || {}), center: c.center || "" };
   // 엑셀 VLOOKUP처럼 같은 계정이 두 번 있으면 위쪽(먼저 나온) 매핑을 씀
   cfg.acctMap = {};
   for (const a of cfg.acct) if (a.a && !Object.prototype.hasOwnProperty.call(cfg.acctMap, a.a)) cfg.acctMap[a.a] = a.i || "";
@@ -1220,7 +1220,7 @@ function renderRules(el) {
   el.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { const k = b.dataset.add; ed[k].push(k === "acct" ? { a: "", i: "", note: "" } : k === "rules" ? { a: "", p: "", i: "" } : ["", ""]); render(); });
   $("#rSave").onclick = async () => {
     if (S.demo || !db) return;
-    const body = { acct: ed.acct.filter(a => a.a), rules: ed.rules.filter(r => r.a && r.p && r.i), std: ed.std.filter(s => s[0] && s[1]), thr: (() => { const ta = $("#thrAmt").value.trim(), tr = $("#thrRate").value.trim(); return { amt: ta !== "" && isFinite(Number(ta)) && Number(ta) >= 0 ? Number(ta) : 500000, rate: tr !== "" && isFinite(Number(tr)) && Number(tr) >= 0 ? Number(tr) / 100 : 0.1 }; })(), center: $("#cfgCenter").value.trim(), updatedBy: S.uid || null, updatedAt: new Date().toISOString() };
+    const body = { acct: ed.acct.filter(a => a.a), rules: ed.rules.filter(r => r.a && r.p && r.i), std: ed.std.filter(s => s[0] && s[1]).map(s => ({ a: s[0], t: s[1] })), thr: (() => { const ta = $("#thrAmt").value.trim(), tr = $("#thrRate").value.trim(); return { amt: ta !== "" && isFinite(Number(ta)) && Number(ta) >= 0 ? Number(ta) : 500000, rate: tr !== "" && isFinite(Number(tr)) && Number(tr) >= 0 ? Number(tr) / 100 : 0.1 }; })(), center: $("#cfgCenter").value.trim(), updatedBy: S.uid || null, updatedAt: new Date().toISOString() };
     const ref = db.doc("config/main");
     try { await queueWrite(ref.path, () => ref.set(body)); U.rulesEdit = null; toast("기준정보를 저장함. 예산과 실적 분류에 바로 반영됨"); render(); } catch (e) { toast(dbErr(e)); }
   };

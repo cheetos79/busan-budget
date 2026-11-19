@@ -131,7 +131,7 @@
           const j = JSON.parse(await f.text());
           const ok = Array.isArray(j.acct) && Array.isArray(j.rules) && Array.isArray(j.std) && j.acct.every(a => a && typeof a.a === "string") && j.rules.every(r => r && typeof r.a === "string" && typeof r.p === "string" && typeof r.i === "string") && j.std.every(s => Array.isArray(s) && s.length === 2);
           if (!ok) { ctx.toast("기준정보 파일 형식이 아님(acct, rules, std 필요)"); return; }
-          const body = { acct: j.acct, rules: j.rules, std: j.std, thr: j.thr || { amt: 500000, rate: 0.1 }, center: String(j.center || ""), updatedBy: EXT.me, updatedAt: new Date().toISOString() };
+          const body = { acct: j.acct, rules: j.rules, std: j.std.map(s => ({ a: s[0], t: s[1] })), thr: j.thr || { amt: 500000, rate: 0.1 }, center: String(j.center || ""), updatedBy: EXT.me, updatedAt: new Date().toISOString() };
           await fs.doc("config/main").set(body); ctx.toast(`기준정보를 올림. 계정 ${body.acct.length}개, 규칙 ${body.rules.length}개, 표준 적요 ${body.std.length}줄`);
         } catch (x) { ctx.toast("파일을 읽거나 저장하지 못함"); }
       };
