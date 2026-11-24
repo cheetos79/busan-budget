@@ -182,7 +182,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
 .ai-out p.l2 { padding-left: 1em; } .ai-out p.l3 { padding-left: 2.2em; color: var(--fg); }
 .ai-out h4 { margin: 14px 0 6px; color: var(--navy); }
 .ai-out table { margin: 6px 0 10px; width: auto; min-width: 60%; }
-.ai-out td { white-space: normal; }
+.ai-out td { white-space: normal; } .ai-out td.num { white-space: nowrap; }
 .thinking { color: var(--muted); font-size: 13px; }
 .chat { display: flex; flex-direction: column; gap: 10px; }
 .msg { padding: 10px 12px; border: 1px solid var(--line); max-width: 92ch; }
@@ -897,7 +897,232 @@ function budgetRows(bd) {
   bd.lines.forEach(l => { const c = classify(S.cfg, l.acct, l.memo, l.ovr); rows.push([bd.ym, l.acct, l.memo, groupOf(c.item), c.item, hasVal(l.qty) ? num(l.qty) : "", hasVal(l.price) ? num(l.price) : "", hasVal(l.direct) ? num(l.direct) : "", budgetAmt(l), l.basis || "", l.ovr || ""]); });
   return rows;
 }
-function exportApproval(bd, doc) {
+// ===== 승인 요청서(엑셀, 보고서 서식) =====
+// 서식 도구(ExcelJS)는 승인 요청서를 받을 때만 불러옴. 불러오지 못하면 서식 없는 기본 표로 저장함
+const XJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+let XJS_P = null;
+function loadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (!XJS_P) {
+    XJS_P = new Promise((res, rej) => {
+      const s = document.createElement("script"), t = setTimeout(() => rej(new Error("ExcelJS")), 15000);
+      s.src = XJS_URL; s.async = true;
+      s.onload = () => { clearTimeout(t); window.ExcelJS ? res(window.ExcelJS) : rej(new Error("ExcelJS")); };
+      s.onerror = () => { clearTimeout(t); rej(new Error("ExcelJS")); };
+      document.head.appendChild(s);
+    });
+    XJS_P.catch(() => { XJS_P = null; });
+  }
+  return XJS_P;
+}
+// 금액을 '4억 7,777만 원'처럼 읽기 쉽게 적음(만 원 미만 반올림)
+function eokTxt(v) {
+  const n = Math.round(Math.abs(v || 0) / 10000); if (!n) return "0원";
+  const e = Math.floor(n / 10000), m = n % 10000, f = x => x.toLocaleString("ko-KR");
+  return (v < 0 ? "△" : "") + (e ? f(e) + "억" + (m ? " " + f(m) + "만" : "") : f(m) + "만") + " 원";
+}
+const eokDiff = v => (v > 0 ? "+" : "") + eokTxt(v);
+const pctTxt = v => (v < 0 ? "△" : "") + Math.abs((v || 0) * 100).toFixed(1) + "%";
+// 화면 자료에서 승인 요청서에 들어갈 값만 뽑음
+function approvalModel(bd, doc) {
+  const f = S.cfg.flow, fl = (doc && doc.flow) || {}, fc = fundCalc(S.cfg, bd.lines), A = agg(), k = bd.ym, day = x => String(x || "").slice(0, 10), idx = BST.indexOf(bState(doc));
+  const by = {}, basis = {}; let unc = 0, uncAmt = 0;
+  bd.lines.forEach(l => {
+    if (!l.acct) return; const it = classify(S.cfg, l.acct, l.memo, l.ovr).item, a = budgetAmt(l);
+    if (it === "미분류") { if (a) { unc++; uncAmt += a; } return; }
+    by[it] = (by[it] || 0) + a;
+    if (l.basis && (!basis[it] || Math.abs(a) > basis[it].a)) basis[it] = { a: Math.abs(a), t: `${l.memo}: ${l.basis}` };
+  });
+  const pk = ymAdd(k, -1), yk = ymAdd(k, -12), pb = A.bud[pk] || {}, ya = A.act[yk] || {};
+  const cur = rowVals(it => by[it] || 0), prev = rowVals(it => pb[it] || 0), yoy = rowVals(it => ya[it] || 0);
+  const hasPrev = LEAVES.some(it => pb[it]), hasYoy = LEAVES.some(it => ya[it]);
+  const sg = (role, kf, mark, date) => ({ role, title: f[kf].title || "", name: f[kf].name || "", mark: mark || "", date: date || "" });
+  const ap = x => (x ? (x.via === "proxy" ? "메일 승인" : "승인") : "");
+  const sign = [sg("작성", "author", idx >= 2 ? "제출" : "", idx >= 2 ? day(doc.lastSubmittedAt || doc.submittedAt) : ""), sg("1차 승인", "a1", ap(fl.a1), day(fl.a1 && fl.a1.at)), sg("2차 승인", "a2", ap(fl.a2), day(fl.a2 && fl.a2.at)), sg("입금 확인", "fund", fl.fund ? "입금" : "", day(fl.fund && fl.fund.date))];
+  const pl = ["매출액", "고정지출", "유동지출", "판매비와 일반관리비", "영업이익(직접)"].map(lb => ({ lb: lb === "영업이익(직접)" ? "영업이익" : lb, cur: cur[lb], prev: prev[lb], yoy: yoy[lb], strong: TOTALS.has(lb), key: lb === "영업이익(직접)" }));
+  pl.push({ lb: "영업이익률", ratio: true, cur: cur["영업이익률"], prev: prev["영업이익률"], yoy: yoy["영업이익률"] });
+  const names = c => fc.items.filter(x => x.cls === c && x.amt).map(x => x.item), etc = fc.items.filter(x => x.cls && x.cls !== "인건비" && x.cls !== "임차료" && x.amt).map(x => x.item);
+  const all = LEAVES.map(it => ({ item: it, group: groupOf(it), cur: by[it] || 0, prev: pb[it] || 0, basis: (basis[it] || {}).t || "", cls: FUND_CLS.includes(S.cfg.fund[it]) ? S.cfg.fund[it] : "" })).filter(x => x.cur || x.prev);
+  const top = (hasPrev ? all.filter(x => x.cur - x.prev).sort((a, b) => Math.abs(b.cur - b.prev) - Math.abs(a.cur - a.prev)) : all.filter(x => x.cur).sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur))).slice(0, 5);
+  const notes = [], via = x => (x.via === "proxy" ? "메일 승인 기록" : "직접 승인") + (x.note ? ": " + x.note : "");
+  if (fl.reject) notes.push([`반려(${(f[fl.reject.step] || {}).title || ""})`, day(fl.reject.at), fl.reject.note || ""]);
+  if (fl.a1) notes.push([`1차 승인(${f.a1.title})`, day(fl.a1.at), via(fl.a1)]);
+  if (fl.a2) notes.push([`2차 승인(${f.a2.title})`, day(fl.a2.at), via(fl.a2)]);
+  if (fl.fund) notes.push(["운영 통장 입금", day(fl.fund.date), `${wonTxt(fl.fund.amt)}원 입금 확인` + (fl.fund.note ? ": " + fl.fund.note : "")]);
+  return { org: "부산대성기숙학원", ym: k, label: ymLabel(k), due: dueOf(k), state: bStateLabel(S.cfg, doc), today: today(), done: idx >= 4, hasPrev, hasYoy, sign, pl,
+    kpi: { rev: cur["매출액"], cost: cur["판매비와 일반관리비"], op: cur["영업이익(직접)"], rate: cur["영업이익률"], req: fc.req, dRev: cur["매출액"] - prev["매출액"], dCost: cur["판매비와 일반관리비"] - prev["판매비와 일반관리비"], dOp: cur["영업이익(직접)"] - prev["영업이익(직접)"] },
+    fund: { spend: fc.spend, labor: fc.인건비, rent: fc.임차료, etc: fc.기타, req: fc.req, laborNames: names("인건비"), rentNames: names("임차료"), etcNames: etc },
+    top, items: all, notes, unc, uncAmt, lines: budgetRows(bd), site: siteUrl() + "#budget" };
+}
+// 승인 요청서 통합 문서를 만듦. XJ는 ExcelJS, M은 approvalModel의 결과
+function buildApprovalBook(XJ, M) {
+  const C = { navy: "FF1F3864", mid: "FF2E5597", pale: "FFE9EFF7", gray: "FFF2F2F2", line: "FFBFBFBF", ink: "FF222222", mute: "FF666666", white: "FFFFFFFF" };
+  const FONT = "맑은 고딕", NUM = "#,##0;△#,##0;-", DIF = "+#,##0;△#,##0;-", PCT = "0.0%;△0.0%;-", DPC = "+0.0%;△0.0%;-";
+  const wb = new XJ.Workbook(); wb.creator = M.org; wb.created = new Date();
+  const side = (c, s) => ({ style: s || "thin", color: { argb: c || C.line } });
+  const vlen = s => { let n = 0; for (const ch of String(s || "")) n += ch.charCodeAt(0) > 255 ? 2 : 1.1; return n; };
+  // 한 칸 또는 합친 칸에 값과 서식을 넣음. 테두리가 칸마다 달라서 서식을 먼저 넣고, 서식을 덮어쓰지 않는 방식으로 합침
+  function put(ws, r, c1, c2, v, o) {
+    o = o || {}; const r2 = o.r2 || r, bx = o.box;
+    for (let i = r; i <= r2; i++) for (let j = c1; j <= c2; j++) {
+      const x = ws.getCell(i, j), b = {};
+      x.font = { name: FONT, size: o.size || 10, bold: !!o.bold, color: { argb: o.color || C.ink } };
+      if (o.fill) x.fill = { type: "pattern", pattern: "solid", fgColor: { argb: o.fill } };
+      x.alignment = { horizontal: o.h || "left", vertical: o.v || "middle", wrapText: !!o.wrap, indent: o.indent || 0 };
+      if (o.fmt) x.numFmt = o.fmt;
+      if (i === r && (bx || o.top)) b.top = bx || o.top;
+      if (i === r2 && (bx || o.bottom)) b.bottom = bx || o.bottom;
+      if (j === c1 && (bx || o.left)) b.left = bx || o.left;
+      if (j === c2 && (bx || o.right)) b.right = bx || o.right;
+      if (Object.keys(b).length) x.border = b;
+    }
+    if (c2 > c1 || r2 > r) ws.mergeCellsWithoutStyle(r, c1, r2, c2);
+    if (v != null && v !== "") ws.getCell(r, c1).value = v;
+  }
+  const page = (o, extra) => Object.assign({ paperSize: 9, orientation: o, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: 0.45, right: 0.45, top: 0.5, bottom: 0.5, header: 0.25, footer: 0.25 } }, extra || {});
+  const TH = { size: 9.5, bold: true, color: C.white, fill: C.navy, h: "center" };
+
+  // ---------- 1 승인요청서 (A4 세로 한 장) ----------
+  const ws = wb.addWorksheet("승인요청서", { views: [{ showGridLines: false }], pageSetup: page("portrait", { fitToHeight: 1 }) });
+  [9, 9, 9, 9, 9, 9, 9, 4.5, 11.5, 11.5, 11.5, 11.5].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  const H = (r, h) => { ws.getRow(r).height = h; };
+  const sec = (r, t, unit) => { const b = side(C.navy, "medium"); put(ws, r, 1, unit ? 9 : 12, t, { size: 11.5, bold: true, color: C.navy, bottom: b }); if (unit) put(ws, r, 10, 12, unit, { size: 8.5, color: C.mute, h: "right", v: "bottom", bottom: b }); H(r, 23); };
+  const k = M.kpi, F = M.fund;
+  put(ws, 1, 1, 12, null, { fill: C.navy }); H(1, 6);
+  put(ws, 2, 1, 7, M.org, { size: 10.5, bold: true, color: C.mid, v: "bottom" });
+  put(ws, 3, 1, 7, `${M.label} 예산 승인 요청서`, { r2: 5, size: 20, bold: true, color: C.navy });
+  put(ws, 6, 1, 7, `출력일 ${M.today}`, { size: 8.5, color: C.mute });
+  const bx = side(C.mute);
+  put(ws, 2, 8, 8, "결\n재", { r2: 6, size: 9.5, bold: true, fill: C.gray, h: "center", wrap: true, box: bx });
+  M.sign.forEach((s, i) => {
+    const c = 9 + i;
+    put(ws, 2, c, c, s.role, { size: 9, bold: true, fill: C.gray, h: "center", box: bx });
+    put(ws, 3, c, c, s.title, { size: 8, color: C.mute, h: "center", wrap: true, top: bx, left: bx, right: bx });
+    put(ws, 4, c, c, s.name, { size: 9.5, bold: true, h: "center", left: bx, right: bx, bottom: bx });
+    put(ws, 5, c, c, s.mark, { size: 11, bold: true, color: C.navy, h: "center", wrap: true, box: bx });
+    put(ws, 6, c, c, s.date, { size: 8, color: C.mute, h: "center", box: bx });
+  });
+  H(2, 17); H(3, 26); H(4, 17); H(5, 31); H(6, 15); H(7, 9);
+  // 문서 정보 띠
+  const lab = { size: 9.5, bold: true, fill: C.gray, h: "center", box: side() }, val = { size: 9.5, h: "center", box: side(), wrap: true };
+  put(ws, 8, 1, 2, "대상 연월", lab); put(ws, 8, 3, 4, M.label, val); put(ws, 8, 5, 6, "제출 기한", lab); put(ws, 8, 7, 8, M.due, val); put(ws, 8, 9, 9, "진행 상태", lab); put(ws, 8, 10, 12, M.state, val);
+  H(8, 22); H(9, 9);
+  // 1 요지
+  let r = 10; sec(r, "1 승인 요청 요지"); r++;
+  const says = [`가. ${M.label} 예산을 매출 ${eokTxt(k.rev)}, 지출 ${eokTxt(k.cost)}, 영업이익 ${eokTxt(k.op)}(영업이익률 ${pctTxt(k.rate)})으로 편성함`,
+    `나. 운영 통장 입금 요청액은 ${eokTxt(F.req)}임. 지출 예산에서 관리 통장이 직접 지급하는 인건비 ${eokTxt(F.labor)}, 임차료 ${eokTxt(F.rent)}과 기타 제외 ${eokTxt(F.etc)}을 뺀 금액임`,
+    M.hasPrev ? `다. 전월 예산과 비교하면 매출 ${eokDiff(k.dRev)}, 지출 ${eokDiff(k.dCost)}, 영업이익 ${eokDiff(k.dOp)} 변동임` : "다. 전월 예산이 없어 전월 대비 증감은 표시하지 않음"];
+  if (M.unc) says.push(`라. 분류되지 않은 예산 ${M.unc}줄(${eokTxt(M.uncAmt)})은 합계에 들어 있지 않음. 계정과 적요 확인 필요`);
+  says.forEach((t, i) => { put(ws, r, 1, 12, t, { size: 10, wrap: true, indent: 1, v: i ? "middle" : "bottom" }); H(r, Math.max(1, Math.ceil(vlen(t) / 118)) * 15 + (i ? 3 : 7)); r++; });
+  H(r, 9); r++;
+  // 핵심 숫자 4칸
+  const cards = [["매출 예산", k.rev, M.hasPrev ? `전월 대비 ${eokDiff(k.dRev)}` : "전월 예산 없음"], ["지출 예산", k.cost, M.hasPrev ? `전월 대비 ${eokDiff(k.dCost)}` : "전월 예산 없음"], ["예상 영업이익", k.op, `영업이익률 ${pctTxt(k.rate)}`], ["운영 통장 입금 요청액", F.req, F.spend ? `지출 예산의 ${(F.req / F.spend * 100).toFixed(1)}%` : ""]];
+  cards.forEach(([t, v, s], i) => {
+    const c1 = 1 + i * 3, c2 = c1 + 2, on = i === 3, bg = on ? C.navy : C.pale, e = side(on ? C.navy : C.line);
+    put(ws, r, c1, c2, t + "(원)", { size: 9, bold: true, color: on ? C.white : C.mute, fill: bg, h: "center", v: "bottom", top: e, left: e, right: e });
+    put(ws, r + 1, c1, c2, Math.round(v), { size: 17, bold: true, color: on ? C.white : C.navy, fill: bg, h: "center", fmt: NUM, left: e, right: e });
+    put(ws, r + 2, c1, c2, s, { size: 8.5, color: on ? C.white : C.mute, fill: bg, h: "center", v: "top", left: e, right: e, bottom: e });
+  });
+  H(r, 19); H(r + 1, 31); H(r + 2, 19); r += 3; H(r, 11); r++;
+  // 2 추정손익 요약
+  sec(r, "2 추정손익 요약", "(단위: 원)"); r++;
+  const head = (rr, cols) => { cols.forEach(([c1, c2, t]) => put(ws, rr, c1, c2, t, TH)); H(rr, 21); };
+  head(r, [[1, 3, "구분"], [4, 5, "이번 예산"], [6, 7, "전월 예산"], [8, 9, "증감"], [10, 10, "증감률"], [11, 12, "전년 동월 실적"]]); r++;
+  M.pl.forEach((p, i) => {
+    const last = i === M.pl.length - 1, o = { size: 10, bold: !!p.strong, fill: p.key ? C.pale : null, bottom: last ? side(C.navy, "medium") : side() }, n = x => Object.assign({}, o, { h: "right" }, x);
+    put(ws, r, 1, 3, p.lb, Object.assign({}, o, { indent: p.strong || p.ratio ? 1 : 2, color: p.ratio ? C.mute : C.ink }));
+    if (p.ratio) {
+      put(ws, r, 4, 5, p.cur, n({ fmt: PCT })); put(ws, r, 6, 7, M.hasPrev ? p.prev : "-", n({ fmt: PCT }));
+      put(ws, r, 8, 9, M.hasPrev ? `${p.cur - p.prev > 0 ? "+" : p.cur - p.prev < 0 ? "△" : ""}${Math.abs((p.cur - p.prev) * 100).toFixed(1)}%p` : "-", n()); put(ws, r, 10, 10, "", n()); put(ws, r, 11, 12, M.hasYoy ? p.yoy : "-", n({ fmt: PCT }));
+    } else {
+      put(ws, r, 4, 5, Math.round(p.cur), n({ fmt: NUM })); put(ws, r, 6, 7, M.hasPrev ? Math.round(p.prev) : "-", n({ fmt: NUM }));
+      put(ws, r, 8, 9, M.hasPrev ? Math.round(p.cur - p.prev) : "-", n({ fmt: DIF })); put(ws, r, 10, 10, M.hasPrev && p.prev ? (p.cur - p.prev) / Math.abs(p.prev) : "-", n({ fmt: DPC })); put(ws, r, 11, 12, M.hasYoy ? Math.round(p.yoy) : "-", n({ fmt: NUM }));
+    }
+    H(r, 20); r++;
+  });
+  H(r, 11); r++;
+  // 3 운영 통장 입금 요청액 산출
+  sec(r, "3 운영 통장 입금 요청액 산출", "(단위: 원)"); r++;
+  head(r, [[1, 4, "구분"], [5, 6, "금액"], [7, 12, "내용"]]); r++;
+  const list = a => (a.length > 4 ? a.slice(0, 4).join(", ") + ` 등 ${a.length}개 항목` : a.join(", "));
+  [["지출 예산 합계", F.spend, "고정지출과 유동지출을 더한 금액"], ["(-) 인건비", F.labor, F.laborNames.length ? "관리 통장에서 직접 지급: " + list(F.laborNames) : "해당 없음"], ["(-) 임차료", F.rent, F.rentNames.length ? "관리 통장에서 직접 지급: " + list(F.rentNames) : "해당 없음"], ["(-) 기타 제외", F.etc, F.etcNames.length ? "돈이 나가지 않는 항목 등: " + list(F.etcNames) : "해당 없음"]].forEach(([t, v, s]) => {
+    put(ws, r, 1, 4, t, { size: 10, indent: 1, bottom: side() }); put(ws, r, 5, 6, Math.round(v), { size: 10, h: "right", fmt: NUM, bottom: side() }); put(ws, r, 7, 12, s, { size: 9, color: C.mute, indent: 1, wrap: true, bottom: side() });
+    H(r, vlen(s) > 62 ? 30 : 20); r++;
+  });
+  put(ws, r, 1, 4, "운영 통장 입금 요청액", { size: 11, bold: true, color: C.white, fill: C.navy, indent: 1 }); put(ws, r, 5, 6, Math.round(F.req), { size: 12, bold: true, color: C.white, fill: C.navy, h: "right", fmt: NUM }); put(ws, r, 7, 12, "승인이 끝나면 관리 통장에서 운영 통장으로 입금함", { size: 9, color: C.white, fill: C.navy, indent: 1 });
+  H(r, 24); r++; H(r, 11); r++;
+  // 4 증감이 큰 항목
+  sec(r, M.hasPrev ? "4 전월 예산 대비 증감이 큰 항목" : "4 금액이 큰 항목", "(단위: 원)"); r++;
+  head(r, [[1, 3, "항목"], [4, 5, "이번 예산"], [6, 7, "전월 예산"], [8, 9, "증감"], [10, 12, "주요 산출근거"]]); r++;
+  if (!M.top.length) { put(ws, r, 1, 12, "해당 항목 없음", { size: 9.5, color: C.mute, h: "center", bottom: side(C.navy, "medium") }); H(r, 20); r++; }
+  M.top.forEach((t, i) => {
+    const b = i === M.top.length - 1 ? side(C.navy, "medium") : side();
+    put(ws, r, 1, 3, `${t.item} (${t.group})`, { size: 10, indent: 1, bottom: b }); put(ws, r, 4, 5, Math.round(t.cur), { size: 10, h: "right", fmt: NUM, bottom: b });
+    put(ws, r, 6, 7, M.hasPrev ? Math.round(t.prev) : "-", { size: 10, h: "right", fmt: NUM, bottom: b }); put(ws, r, 8, 9, M.hasPrev ? Math.round(t.cur - t.prev) : "-", { size: 10, h: "right", fmt: DIF, bottom: b });
+    put(ws, r, 10, 12, t.basis || "산출근거 미입력", { size: 8.5, color: C.mute, indent: 1, wrap: true, bottom: b });
+    H(r, vlen(t.basis) > 36 ? 28 : 20); r++;
+  });
+  H(r, 11); r++;
+  // 5 승인 의견과 처리 기록
+  sec(r, "5 승인 의견과 처리 기록"); r++;
+  M.notes.forEach(([w, d, t]) => { put(ws, r, 1, 3, w, { size: 9.5, bold: true, indent: 1, bottom: side() }); put(ws, r, 4, 5, d, { size: 9.5, h: "center", bottom: side() }); put(ws, r, 6, 12, t, { size: 9.5, wrap: true, bottom: side() }); H(r, vlen(t) > 70 ? 30 : 20); r++; });
+  if (!M.done) { put(ws, r, 1, 2, "승인 의견", { r2: r + 1, size: 9.5, bold: true, fill: C.gray, h: "center", box: side() }); put(ws, r, 3, 12, null, { r2: r + 1, box: side() }); H(r, 22); H(r + 1, 22); r += 2; }
+  else if (!M.notes.length) { put(ws, r, 1, 12, "기록 없음", { size: 9.5, color: C.mute, h: "center", bottom: side() }); H(r, 20); r++; }
+  H(r, 7); r++;
+  put(ws, r, 1, 12, `항목별 예산은 '항목별 예산' 시트, 줄 단위 내역은 '예산상세' 시트에 있음. 확인 주소 ${M.site}`, { size: 8, color: C.mute }); H(r, 15);
+  ws.pageSetup.printArea = `A1:L${r}`;
+
+  // ---------- 2 항목별 예산 ----------
+  const w2 = wb.addWorksheet("항목별 예산", { views: [{ showGridLines: false, state: "frozen", ySplit: 4 }], pageSetup: page("portrait") });
+  [10, 26, 17, 17, 17, 11, 30].forEach((w, i) => { w2.getColumn(i + 1).width = w; });
+  put(w2, 1, 1, 7, `${M.label} 항목별 예산`, { size: 14, bold: true, color: C.navy }); w2.getRow(1).height = 26;
+  put(w2, 2, 1, 5, `${M.org}, 진행 상태 ${M.state}`, { size: 9, color: C.mute }); put(w2, 2, 6, 7, "(단위: 원)", { size: 8.5, color: C.mute, h: "right" });
+  w2.getRow(3).height = 6;
+  ["구분", "실적표 항목", "이번 예산", "전월 예산", "증감", "증감률", "입금 구분"].forEach((t, i) => put(w2, 4, i + 1, i + 1, t, TH)); w2.getRow(4).height = 21;
+  let q = 5;
+  const line2 = (g, name, c, p, cls, o) => {
+    o = Object.assign({ size: 10, bottom: side() }, o || {}); const n = x => Object.assign({}, o, { h: "right" }, x);
+    put(w2, q, 1, 1, g, Object.assign({}, o, { h: "center" })); put(w2, q, 2, 2, name, Object.assign({}, o, { indent: 1 }));
+    put(w2, q, 3, 3, Math.round(c), n({ fmt: NUM })); put(w2, q, 4, 4, M.hasPrev ? Math.round(p) : "-", n({ fmt: NUM })); put(w2, q, 5, 5, M.hasPrev ? Math.round(c - p) : "-", n({ fmt: DIF }));
+    put(w2, q, 6, 6, M.hasPrev && p ? (c - p) / Math.abs(p) : "-", n({ fmt: DPC })); put(w2, q, 7, 7, cls, Object.assign({}, o, { size: 9, color: C.mute, indent: 1 }));
+    w2.getRow(q).height = 19; q++;
+  };
+  ["매출", "고정비", "변동비", "이익조정"].forEach(g => {
+    const rows = M.items.filter(x => x.group === g); if (!rows.length) return;
+    rows.forEach(x => line2(g, x.item, x.cur, x.prev, g === "고정비" || g === "변동비" ? (x.cls ? x.cls + "(입금 요청 제외)" : "입금 요청") : ""));
+    line2("", g + " 합계", rows.reduce((s, x) => s + x.cur, 0), rows.reduce((s, x) => s + x.prev, 0), "", { bold: true, fill: C.gray });
+  });
+  const op = M.pl.find(p => p.key);
+  if (op) line2("", "영업이익", op.cur, op.prev, "매출 합계 - 고정비 합계 - 변동비 합계", { bold: true, fill: C.pale, bottom: side(C.navy, "medium") });
+  w2.pageSetup.printTitlesRow = "4:4"; w2.headerFooter.oddFooter = "&C&8&P / &N";
+
+  // ---------- 3 예산상세 ----------
+  const w3 = wb.addWorksheet("예산상세", { views: [{ showGridLines: false, state: "frozen", ySplit: 1 }], pageSetup: page("landscape") });
+  [9, 18, 32, 8, 20, 8, 12, 14, 14, 30, 14].forEach((w, i) => { w3.getColumn(i + 1).width = w; });
+  M.lines.forEach((row, i) => {
+    row.forEach((v, j) => {
+      if (!i) { put(w3, 1, j + 1, j + 1, v, TH); return; }
+      const isN = j >= 5 && j <= 8;
+      put(w3, i + 1, j + 1, j + 1, v, { size: 9.5, h: isN ? "right" : j === 0 || j === 3 ? "center" : "left", indent: isN || j === 0 || j === 3 ? 0 : 1, fmt: isN ? "#,##0" : null, bold: j === 8, wrap: j === 2 || j === 9, v: "middle", bottom: side() });
+    });
+    w3.getRow(i + 1).height = i ? Math.min(4, Math.max(1, Math.ceil(vlen(row[2]) / 32), Math.ceil(vlen(row[9]) / 30))) * 14 + 4 : 21;
+  });
+  if (M.lines.length > 1) w3.autoFilter = { from: { row: 1, column: 1 }, to: { row: M.lines.length, column: M.lines[0].length } };
+  w3.pageSetup.printTitlesRow = "1:1"; w3.headerFooter.oddFooter = "&C&8&P / &N";
+  return wb;
+}
+async function exportApproval(bd, doc) {
+  if (!dls || DLS_OFF) { toast("이 화면에서는 파일을 내려받을 수 없음"); return; }
+  if (U.xbusy) return; U.xbusy = true; toast("승인 요청서를 만드는 중");
+  try {
+    let XJ = null; try { XJ = await loadExcelJS(); } catch (e) { XJ = null; }
+    if (!XJ) { toast("서식 도구를 불러오지 못해 기본 표로 저장함"); exportApprovalPlain(bd, doc); return; }
+    const buf = await buildApprovalBook(XJ, approvalModel(bd, doc)).xlsx.writeBuffer();
+    await saveData(`부산대성_예산승인요청서_${bd.ym}.xlsx`, new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  } catch (e) { console.error(e); toast("승인 요청서를 만들지 못함"); }
+  finally { U.xbusy = false; }
+}
+function exportApprovalPlain(bd, doc) {
   if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
   const f = S.cfg.flow, fl = (doc && doc.flow) || {}, fc = fundCalc(S.cfg, bd.lines), A = agg(), k = bd.ym, day = x => String(x || "").slice(0, 10);
   const by = {}; bd.lines.forEach(l => { if (!l.acct) return; const it = classify(S.cfg, l.acct, l.memo, l.ovr).item; by[it] = (by[it] || 0) + budgetAmt(l); });
@@ -1483,8 +1708,13 @@ function canExport() { return !!window.XLSX && !!dls && !DLS_OFF; }
 async function saveXlsx(wb, name) {
   if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
   if (!dls || DLS_OFF) { toast("이 화면에서는 파일을 내려받을 수 없음"); return; }
-  if (S.demo) name = "예시_" + name;
-  try { const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }); await dls.save({ filename: name + ".xlsx", data: new Blob([buf]) }); }
+  let buf; try { buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }); } catch (e) { toast("파일을 저장하지 못함"); return; }
+  await saveData(name + ".xlsx", new Blob([buf]));
+}
+async function saveData(filename, blob) {
+  if (!dls || DLS_OFF) { toast("이 화면에서는 파일을 내려받을 수 없음"); return; }
+  if (S.demo) filename = "예시_" + filename;
+  try { await dls.save({ filename, data: blob }); }
   catch (e) {
     const c = e && e.code;
     if (c === "declined") return;

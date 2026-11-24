@@ -182,7 +182,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
 .ai-out p.l2 { padding-left: 1em; } .ai-out p.l3 { padding-left: 2.2em; color: var(--fg); }
 .ai-out h4 { margin: 14px 0 6px; color: var(--navy); }
 .ai-out table { margin: 6px 0 10px; width: auto; min-width: 60%; }
-.ai-out td { white-space: normal; }
+.ai-out td { white-space: normal; } .ai-out td.num { white-space: nowrap; }
 .thinking { color: var(--muted); font-size: 13px; }
 .chat { display: flex; flex-direction: column; gap: 10px; }
 .msg { padding: 10px 12px; border: 1px solid var(--line); max-width: 92ch; }
@@ -493,7 +493,190 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     }
   }
 
-  // 실행 환경: 저장소와 사용자는 연습용, 파일 내려받기와 AI는 claude.ai에서 열었을 때만 실제 기능을 씀
+  // ===== 연습용 AI 응답 =====
+  // 실제 AI를 부를 수 없는 곳(GitHub 연습판, 단독 파일)에서도 AI 분석 화면을 끝까지 써 볼 수 있게, 화면의 수치를 정해진 틀에 넣어 보고와 답을 만듦
+  const AIP = { mode: "practice", fast: false, fell: false };
+  const AI_PERM_T = ["not_granted", "sampling_disabled", "not_declared", "capability_disabled", "capability_removed"];
+  const TAG = "(연습용 응답임. 화면의 수치를 정해진 틀에 넣어 만든 예시이고 실제 AI가 쓴 글이 아님)", TAG_S = "(연습용 응답)";
+  const man = v => (v < 0 ? "△" : "") + n0(Math.abs(v || 0) / 10000) + "만원";
+  const rate = (a, b) => (b ? (a / b * 100).toFixed(1) + "%" : "-");
+  const pct = v => (isFinite(v) ? (v * 100).toFixed(1) + "%" : "-");
+  const clean = s => String(s || "").replace(/[|\r\n]+/g, " ").trim();
+  const KA = "가나다라마바사아자차";
+  function leavesOf(lb) { const s = new Set(), walk = x => { const q = ROWMAP[x]; if (!q) return; if (q[1] === "leaf") s.add(x); else if (q[1] === "sum") q[3].forEach(walk); }; walk(lb); return s; }
+  function aiData() {
+    const ai = U.ai; if (!ai.y) { const p = ymParts(latestActualYm()); ai.y = p[0]; ai.k = p[1]; }
+    const t = ai.t, y = ai.y, k = ai.k, P = periods(t, y, k), A = agg(), d = D(), thr = S.cfg.thr;
+    const bv = rangeVals(A.bud, P.cur), av = rangeVals(A.act, P.cur), pv = P.prev ? rangeVals(A.act, P.prev) : null, yv = rangeVals(A.act, P.yoy);
+    const ms = months(P.cur[0], P.cur[1]), lab = t === "M" ? `${y}년 ${k}월` : t === "Q" ? `${y}년 ${k}분기` : `${y}년 1~${k}월 누계`;
+    const reasons = {}; ms.forEach(m => Object.entries((d.R[m] || {}).items || {}).forEach(([it, v]) => { if (v && v.reason) (reasons[it] = reasons[it] || []).push(v.reason); }));
+    const led = lb => { const set = leavesOf(lb), out = []; ms.forEach(m => ((d.L[m] || {}).lines || []).forEach(l => { if (set.has(classify(S.cfg, l.a, l.m, l.ovr).item)) out.push(l); })); return out.sort((a, b) => Math.abs(ledgerAmt(b)) - Math.abs(ledgerAmt(a))); };
+    return { t, y, k, P, A, d, thr, bv, av, pv, yv, ms, lab, reasons, led, hasAct: LEAVES.some(it => av[it]), hasBud: LEAVES.some(it => bv[it]) };
+  }
+  const gapTxt = (nat, d) => (nat === "R" ? (d >= 0 ? `목표보다 ${man(d)} 많음` : `목표보다 ${man(-d)} 부족함`) : (d > 0 ? `예산보다 ${man(d)} 더 집행함` : `예산보다 ${man(-d)} 덜 집행함`));
+  const chgTxt = (name, cur, base) => `${name}: ${man(base)}에서 ${man(cur)}으로 ${cur - base >= 0 ? "늘어남" : "줄어듦"}(${cur - base > 0 ? "+" : ""}${man(cur - base)}${base ? ", " + (cur - base > 0 ? "+" : "") + ((cur - base) / Math.abs(base) * 100).toFixed(1).replace("-", "△") + "%" : ""})`;
+  const R_ = "매출액", C_ = "판매비와 일반관리비", O_ = "영업이익(직접)";
+  function sumLines(x) {
+    const { bv, av } = x;
+    if (!x.hasAct) return [`가. ${x.lab} 실적이 아직 없어 예산만 확인함`, `나. 매출 예산 ${man(bv[R_])}, 지출 예산 ${man(bv[C_])}, 영업이익 예산 ${man(bv[O_])}임`];
+    return [`가. 매출액은 예산 ${man(bv[R_])} 대비 실적 ${man(av[R_])}으로 달성률 ${rate(av[R_], bv[R_])}임`, `나. 판매비와 일반관리비는 예산 ${man(bv[C_])} 대비 실적 ${man(av[C_])}으로 집행률 ${rate(av[C_], bv[C_])}임`, `다. 영업이익은 예산 ${man(bv[O_])} 대비 실적 ${man(av[O_])}(차이 ${man(av[O_] - bv[O_])})이고 영업이익률은 ${pct(av["영업이익률"])}임`];
+  }
+  const flagged = x => LEAVES.map(it => ({ it, f: flagOf(ROWMAP[it][4], x.bv[it], x.av[it], x.thr) })).filter(z => z.f);
+  const topDiff = (x, n) => LEAVES.map(it => ({ it, b: x.bv[it], a: x.av[it], d: x.av[it] - x.bv[it], nat: ROWMAP[it][4] })).filter(z => z.d).sort((p, q) => Math.abs(q.d) - Math.abs(p.d)).slice(0, n);
+  function practiceReport() {
+    const x = aiData(), { bv, av, pv, yv, thr, ms, d, A } = x, L = [];
+    L.push("1 요약");
+    if (!x.hasAct && !x.hasBud) { L.push(`가. ${x.lab}에는 예산과 실적이 모두 없음. 예산 입력과 실적 입력을 먼저 해야 분석할 수 있음`, "", TAG); return L.join("\n"); }
+    sumLines(x).forEach(s => L.push(s));
+    L.push("2 예산 대비 주요 차이");
+    const top = topDiff(x, 5);
+    if (!x.hasAct) L.push("가. 실적이 없어 차이를 계산하지 않음. 원장과 매출을 입력한 뒤 다시 실행 필요");
+    else if (!top.length) L.push("가. 예산과 실적이 같아 차이가 없음");
+    else {
+      L.push("|항목|예산|실적|차이|달성률|원인 단서|", "|---|---|---|---|---|---|");
+      top.forEach(z => { const rs = x.reasons[z.it], l0 = x.led(z.it)[0]; L.push(`|${z.it}|${man(z.b)}|${man(z.a)}|${man(z.d)}|${rate(z.a, z.b)}|${clean(rs ? "입력된 사유: " + rs[0] : l0 ? "원장 최대 건: " + l0.m : z.nat === "R" ? "매출 입력 값 기준, 사유 확인 필요" : "확인 필요")}|`); });
+      top.forEach((z, i) => {
+        const ll = x.led(z.it).slice(0, 3), rs = x.reasons[z.it]; let n = 1;
+        L.push(`${KA[i]}. ${z.it}: ${gapTxt(z.nat, z.d)}`);
+        if (ll.length) L.push(`${n++}) 원장에서 금액이 큰 내역은 ${ll.map(l => `${clean(l.m)}(${man(ledgerAmt(l))})`).join(", ")}임`);
+        L.push(rs ? `${n}) 담당자가 적은 사유는 '${clean(rs[0])}'임` : `${n}) 차이사유가 입력되지 않음. 분석 화면에서 사유 입력 필요`);
+      });
+    }
+    L.push("3 직전 기간, 전년 동기 대비 변화");
+    if (!x.hasAct) L.push("가. 실적이 없어 비교하지 않음");
+    else {
+      const three = b => [chgTxt("매출액", av[R_], b[R_]), chgTxt("판매비와 일반관리비", av[C_], b[C_]), chgTxt("영업이익", av[O_], b[O_])].forEach((s, i) => L.push(`${i + 1}) ${s}`));
+      if (!pv) L.push("가. 연간 누계는 직전 기간과 비교하지 않음");
+      else if (!LEAVES.some(it => pv[it])) L.push(`가. 직전 기간(${rangeLabel(x.P.prev)}) 실적이 없어 비교하지 않음`);
+      else { L.push(`가. 직전 기간(${rangeLabel(x.P.prev)}) 대비`); three(pv); }
+      if (!LEAVES.some(it => yv[it])) L.push(`나. 전년 동기(${rangeLabel(x.P.yoy)}) 실적이 없어 비교하지 않음`);
+      else {
+        L.push(`나. 전년 동기(${rangeLabel(x.P.yoy)}) 대비`); three(yv);
+        const big = LEAVES.map(it => ({ it, d: av[it] - yv[it] })).filter(z => z.d).sort((p, q) => Math.abs(q.d) - Math.abs(p.d))[0];
+        if (big) L.push(`다. 전년 동기 대비 변화가 가장 큰 항목은 ${big.it}(${big.d > 0 ? "+" : ""}${man(big.d)})임`);
+      }
+    }
+    L.push("4 점검이 필요한 사항");
+    const pts = [], fl = x.hasAct ? flagged(x) : [];
+    if (fl.length) pts.push(`점검 기준(차이 ${man(thr.amt)} 이상이면서 ${Math.round(thr.rate * 100)}% 이상)을 넘은 항목은 ${fl.length}개임: ${fl.slice(0, 6).map(z => `${z.it}(${z.f})`).join(", ")}${fl.length > 6 ? " 등" : ""}`);
+    else if (x.hasAct) pts.push("점검 기준을 넘은 항목이 없음");
+    const noR = fl.filter(z => !x.reasons[z.it]);
+    if (noR.length) pts.push(`기준을 넘었는데 차이사유가 없는 항목은 ${noR.length}개임: ${noR.slice(0, 6).map(z => z.it).join(", ")}${noR.length > 6 ? " 등" : ""}. 사유 입력 필요`);
+    const lst = ms.reduce((s, m) => { const q = A.lst[m] || {}; s.unc += q.unc || 0; s.uncAmt += q.uncAmt || 0; return s; }, { unc: 0, uncAmt: 0 }), bun = ms.reduce((s, m) => s + ((A.bst[m] || {}).unc || 0), 0);
+    if (lst.unc) pts.push(`원장 미분류 ${lst.unc}줄(${man(lst.uncAmt)})이 실적에서 빠져 있음. 실적 입력 화면에서 항목 직접지정 필요`);
+    if (bun) pts.push(`예산 미분류 ${bun}줄이 예산 합계에서 빠져 있음`);
+    const noL = ms.filter(m => !d.L[m]), noA = ms.filter(m => !d.A[m]), noB = ms.filter(m => BST.indexOf(bState(d.B[m])) < 4);
+    if (noL.length) pts.push(`원장을 올리지 않은 달이 있음: ${noL.join(", ")}`);
+    if (noA.length) pts.push(`매출을 입력하지 않은 달이 있음: ${noA.join(", ")}`);
+    if (noB.length) pts.push(`예산 승인이 끝나지 않은 달이 있음: ${noB.slice(0, 4).map(m => `${m}(${bStateLabel(S.cfg, d.B[m])})`).join(", ")}${noB.length > 4 ? " 등" : ""}`);
+    if (!pts.length) pts.push("자료 상태에 특이 사항 없음");
+    pts.forEach((p, i) => L.push(`${KA[i]}. ${p}`));
+    L.push("5 다음 예산 편성 시 고려사항");
+    const adv = [];
+    fl.slice(0, 4).forEach(z => {
+      if (z.f === "예산초과") adv.push(`${z.it}: 이번 실적 ${man(av[z.it])} 수준이 이어지는지 확인하고, 이어진다면 예산을 그만큼 올리는 방안 검토 [추정]`);
+      else if (z.f === "과소집행") adv.push(`${z.it}: 집행이 뒤로 밀린 것인지 확인하고, 밀린 금액이면 다음 달 예산에 더함 [추정]`);
+      else if (z.f === "목표미달") adv.push(`${z.it}: 인원과 단가 가정을 실적 기준으로 다시 잡을 필요 있음 [추정]`);
+      else if (z.f === "목표초과") adv.push(`${z.it}: 초과분이 이번 한 번에 그치는 매출인지 확인 필요`);
+      else if (z.f === "예산미편성") adv.push(`${z.it}: 예산 없이 ${man(av[z.it])} 집행됨. 다음 예산에 항목 추가 필요`);
+    });
+    const LR = "강사료율(강사료/매출)";
+    if (x.hasAct && av[LR]) adv.push(`강사료율(강사료/매출)은 예산 ${pct(bv[LR])}, 실적 ${pct(av[LR])}임. 매출 예산을 바꾸면 강사료 예산도 함께 확인 필요`);
+    if (!adv.length) adv.push(x.hasAct ? "점검 기준을 넘은 항목이 없어 지금 예산 수준을 유지해도 무리가 없어 보임 [추정]" : "실적이 쌓인 뒤 다시 실행해 예산과 비교 필요");
+    adv.forEach((p, i) => L.push(`${KA[i]}. ${p}`));
+    L.push("", TAG);
+    return L.join("\n");
+  }
+  const ALIAS = [["판관비", C_], ["영업이익", O_], ["이익", O_], ["매출", R_], ["고정비", "고정지출"], ["변동비", "유동지출"], ["지출", C_], ["비용", C_]];
+  function findLabel(q) {
+    const s = String(q || "").replace(/\s/g, ""), cands = [];
+    ROWS.forEach(r => { const a = r[0].replace(/\s/g, ""), b = a.replace(/\(.*\)$/, ""); cands.push([a, r[0]]); if (b !== a && b.length >= 2) cands.push([b, r[0]]); });
+    ALIAS.forEach(p => cands.push(p)); cands.sort((p, q2) => q2[0].length - p[0].length);
+    for (const [a, n] of cands) if (s.includes(a)) return n;
+    return null;
+  }
+  function practiceAnswer(q) {
+    const x = aiData(), { bv, av, pv, yv, A } = x, s = String(q || ""), lb = findLabel(s), L = [];
+    const next = /다음\s*달|내달|다음\s*예산|내년|얼마로|잡는|편성/.test(s), why = /이유|원인|왜|많이|초과|적게|부족|찾아|내역|원장|차이/.test(s), lst = /가장|상위|큰|점검|문제|주의|눈에/.test(s), sumQ = /요약|전체|현황|정리|총평|(이번|실적|예산).*어때/.test(s);
+    if (!x.hasAct && !x.hasBud) return `${x.lab}에는 예산과 실적이 모두 없어 답할 자료가 없음\n\n${TAG_S}`;
+    if (lb && ROWMAP[lb][1] === "ratio") L.push(`${lb}: 예산 ${pct(bv[lb])}, 실적 ${pct(av[lb])}${pv ? `, 직전 기간 ${pct(pv[lb])}` : ""}, 전년 동기 ${pct(yv[lb])}임`);
+    else if (lb) {
+      const nat = ROWMAP[lb][4], name = lb === O_ ? "영업이익" : lb; let i = 0;
+      L.push(`${KA[i++]}. ${name}(${x.lab}): 예산 ${man(bv[lb])}, 실적 ${man(av[lb])}, 차이 ${man(av[lb] - bv[lb])}, 달성률 ${rate(av[lb], bv[lb])}임${x.hasAct && av[lb] - bv[lb] ? ". " + gapTxt(nat, av[lb] - bv[lb]) : ""}`);
+      if (next) {
+        const end = x.P.cur[1], vals = [0, -1, -2].map(n => ymAdd(end, n)).filter(m => A.act[m]).map(m => rangeVals(A.act, [m, m])[lb]), nm = ymAdd(end, 1), nb = A.bud[nm] ? rangeVals(A.bud, [nm, nm])[lb] : 0;
+        if (vals.length) L.push(`${KA[i++]}. 최근 ${vals.length}개월 실적 평균은 ${man(vals.reduce((a, b) => a + b, 0) / vals.length)}임. 이 금액을 출발점으로 하고 확정된 계약, 인원 변동을 더하고 빼서 잡는 방법을 권함 [추정]`);
+        else L.push(`${KA[i++]}. 최근 실적이 없어 이번 예산 ${man(bv[lb])}을 그대로 참고할 수밖에 없음`);
+        if (nb) L.push(`${KA[i++]}. 이미 입력된 ${ymLabel(nm)} 예산은 ${man(nb)}임`);
+      }
+      if (why || !next) {
+        const ll = x.led(lb).slice(0, 5), rs = [...leavesOf(lb)].flatMap(it => (x.reasons[it] || []).map(r => `${it}: ${r}`));
+        if (ll.length) { L.push(`${KA[i++]}. 원장에서 금액이 큰 내역`); ll.forEach((l, j) => L.push(`${j + 1}) ${l.d} ${clean(l.a)} ${clean(l.m)} ${man(ledgerAmt(l))}`)); }
+        else L.push(`${KA[i++]}. ${nat === "R" ? "매출은 원장이 아니라 '매출과 원장 외 실적' 입력 값으로 집계해 원장 내역이 없음" : "이 기간 원장에 해당 내역이 없음"}`);
+        L.push(rs.length ? `${KA[i++]}. 입력된 차이사유: ${rs.slice(0, 3).map(r => `'${clean(r)}'`).join(", ")}` : `${KA[i++]}. 차이사유는 입력되지 않음. 원인은 담당자 확인 필요`);
+      }
+      if (!next && x.hasAct) L.push(`${KA[i++]}. ${pv ? `직전 기간 실적 ${man(pv[lb])}, ` : ""}전년 동기 실적 ${man(yv[lb])}임`);
+    } else if (lst) {
+      const top = topDiff(x, 5), fl = flagged(x);
+      if (!top.length) L.push("예산과 실적의 차이가 없거나 실적이 아직 없음");
+      else { L.push(`${x.lab} 예산과 실적의 차이가 큰 항목`); top.forEach((z, i) => L.push(`${i + 1}) ${z.it}: ${gapTxt(z.nat, z.d)}${(fl.find(f => f.it === z.it) || {}).f ? " (" + fl.find(f => f.it === z.it).f + ")" : ""}`)); }
+    } else if (sumQ) sumLines(x).forEach(t => L.push(t));
+    else L.push("연습용 응답은 항목 이름이 들어간 질문에 답함. 아래처럼 물어봄", "가. 광고선전비가 예산보다 많이 나간 이유를 원장에서 찾아줘", "나. 다음 달 강사료 예산은 얼마로 잡는 게 좋을까", "다. 차이가 큰 항목을 알려줘", "라. 이번 기간을 요약해줘", "실제 시스템에서는 Claude가 자유로운 질문에도 답함");
+    L.push("", TAG_S);
+    return L.join("\n");
+  }
+  const pause = (ms, sig) => new Promise((res, rej) => {
+    if (sig && sig.aborted) { rej(new Error("abort")); return; }
+    const stop = () => { clearTimeout(t); rej(new Error("abort")); }, t = setTimeout(() => { if (sig) sig.removeEventListener("abort", stop); res(); }, ms);
+    if (sig) sig.addEventListener("abort", stop, { once: true });
+  });
+  // 실제 AI처럼 위에서부터 한 줄씩 내보냄. 중지를 누르면 그때까지 쓴 글을 돌려줌
+  async function streamOut(text, opts) {
+    const sig = opts && opts.signal, on = opts && opts.onText, lines = text.split("\n"); let shown = "";
+    try {
+      await pause(AIP.fast ? 0 : 700, sig);
+      for (let i = 0; i < lines.length; i++) { shown += (i ? "\n" : "") + lines[i]; if (on) on({ text: shown, delta: lines[i] }); if (lines[i].trim()) await pause(AIP.fast ? 0 : 90, sig); }
+    } catch (e) { throw { code: "cancelled", message: "cancelled", text: shown }; }
+    return { text, truncated: false };
+  }
+  const lastQ = turns => { const u = (turns || []).filter(m => m && m.role === "user"); return u.length ? u[u.length - 1].content : ""; };
+  function trainSample(realS) {
+    AIP.mode = realS ? "real" : "practice";
+    const local = (input, opts) => streamOut(typeof input === "string" ? practiceReport() : practiceAnswer(lastQ(input)), opts);
+    return async (input, opts) => {
+      let r;
+      if (AIP.mode === "real") {
+        try { r = await realS(input, opts); }
+        catch (e) {
+          if ((e && e.code === "cancelled") || (opts && opts.signal && opts.signal.aborted)) throw e;
+          if (e && AI_PERM_T.includes(e.code)) AIP.mode = "practice";
+          AIP.fell = true; paintAi(); r = await local(input, opts);
+        }
+      } else r = await local(input, opts);
+      flag(typeof input === "string" ? "aiRun" : "aiAsk");
+      return r;
+    };
+  }
+  // AI 분석 화면에 지금 어떤 방식으로 답하는지 알림
+  function paintAi() {
+    const v = byId("view-ai"); if (!v || U.view !== "ai") return;
+    const old = byId("tAiNote"); if (old) old.remove();
+    const head = v.querySelector(".vhead"), sub = head && head.querySelector(".sub-t"), real = AIP.mode === "real"; if (!head) return;
+    if (sub && !real) sub.textContent = "선택한 기간의 예산, 실적, 원장 적요, 차이사유로 분석 보고를 만듦. 이 연습판은 실제 AI를 부르지 않아 사용량이 쓰이지 않음";
+    const n = document.createElement("div"); n.id = "tAiNote"; n.className = "banner info";
+    n.textContent = real ? "claude.ai에서 연 연습판이라 실제 Claude가 답함. AI 사용을 허용하지 않거나 호출이 실패하면 연습용 응답으로 바뀜" + (AIP.fell ? ". 방금 호출이 되지 않아 연습용 응답을 보여 줌" : "") : "연습용 응답으로 답함. 실행, 중지, 저장, 질문하는 순서는 실제 시스템과 같음. 답은 화면의 수치를 정해진 틀에 넣어 만든 예시이고, 실제 시스템에서는 Claude가 원장 적요와 차이사유를 읽고 직접 씀";
+    head.insertAdjacentElement("afterend", n);
+  }
+  function fillQuestion() {
+    onView("ai", () => {
+      const box = byId("chatIn"); if (!box || box.disabled) { toast("답변이 끝난 뒤 다시 누름"); return; }
+      const x = aiData(), z = topDiff(x, 33).find(q => q.nat === "C" && x.led(q.it).length);
+      box.value = z ? `${z.it} 실적이 예산과 차이 나는 이유를 원장에서 찾아줘` : "이번 기간을 요약해줘";
+      box.focus(); box.scrollIntoView({ block: "center" }); toast("질문을 넣음. '보내기'를 누름");
+    });
+  }
+
+  // 실행 환경: 저장소와 사용자는 연습용. 파일 내려받기와 AI는 claude.ai에서 열면 실제 기능을 쓰고, 그 밖에서는 브라우저 저장과 연습용 응답으로 대신함
   const real = window.claude && typeof window.claude.use === "function" ? window.claude : null;
   const realUse = async n => { if (!real) return null; try { return await real.use(n); } catch (e) { return null; } };
   const anchorDl = { save: async r => { const blob = r.data instanceof Blob ? r.data : new Blob([r.data]); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = r.filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 3000); return { status: "saved" }; } };
@@ -503,12 +686,11 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
   };
   const EXT = window.BDB_EXT = window.BDB_EXT || {};
   EXT.siteUrl = REAL_URL;
-  EXT.aiMissing = "이 연습판에서는 AI 분석을 실행할 수 없음. claude.ai에 게시된 연습판이나 실제 시스템에서 써 볼 수 있음";
   EXT.runtime = { use: async n => {
     if (n === "db") { ensureStore(); return localDb; }
     if (n === "user") return userShim;
     if (n === "downloads") return real ? await realUse("downloads") : anchorDl;
-    if (n === "sample") return await realUse("sample");
+    if (n === "sample") return trainSample(await realUse("sample"));
     return null;
   } };
 
@@ -573,7 +755,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
         how: ["<b>저장</b>은 작성 중인 내용을 보관함. 여러 번 눌러도 됨", "<b>저장 후 제출</b>을 누르면 제출 일자가 기록되고 승인 단계로 넘어감. 미분류 줄이 있으면 저장만 되고 제출은 되지 않음", "제출한 예산은 고칠 수 없음. 고치려면 '승인 진행' 판의 <b>회수하여 수정</b>을 누름"],
         check: `${bud} 예산이 제출됨`, done: () => stAt(m.bud) >= 2, targets: ["#bSave", "#bSubmit"] },
       { view: "budget", title: "승인 요청서와 메일 문안", goal: "제출한 예산의 승인을 요청할 자료를 준비함", pre: budPre, month: budMonth,
-        how: ["제출하면 '승인 진행' 판이 1차 승인 단계로 바뀜. 5단계(작성, 제출, 1차 승인, 2차 승인, 운영 통장 입금) 가운데 지금 할 단계가 표시됨", "<b>승인 요청서 받기(엑셀)</b>를 누르면 예산 요약, 입금 요청액, 항목별 예산이 한 장에 들어간 파일을 받음", "<b>문안 복사</b>를 눌러 메일 본문을 복사하고, 승인 요청서를 첨부해 원장에게 보냄", "운영 통장 입금 요청액은 지출 예산에서 인건비와 임차료를 뺀 금액임. 인건비와 임차료는 관리 통장에서 직접 지급함"],
+        how: ["제출하면 '승인 진행' 판이 1차 승인 단계로 바뀜. 5단계(작성, 제출, 1차 승인, 2차 승인, 운영 통장 입금) 가운데 지금 할 단계가 표시됨", "<b>승인 요청서 받기(엑셀)</b>를 누르면 보고서 서식의 엑셀을 받음. 첫 장에 결재란, 핵심 숫자 4개, 추정손익 요약, 입금 요청액 산출, 전월 대비 증감이 큰 항목이 한 장으로 들어 있어 그대로 인쇄하거나 메일에 첨부함", "<b>문안 복사</b>를 눌러 메일 본문을 복사하고, 승인 요청서를 첨부해 원장에게 보냄", "운영 통장 입금 요청액은 지출 예산에서 인건비와 임차료를 뺀 금액임. 인건비와 임차료는 관리 통장에서 직접 지급함"],
         check: "승인 요청서 받기나 문안 복사를 한 번 눌러 봄", done: () => !!T.flags.flowDoc || stAt(m.bud) >= 3, targets: ["#fDoc", "#fMail"] },
       { view: "budget", title: "원장, 상무 승인 기록", goal: "1차(원장), 2차(디지털대성 상무) 승인을 차례로 기록함", pre: budPre, month: budMonth,
         how: ["실제로는 승인자가 로그인해 <b>승인</b>을 누르거나, 메일로 승인하면 받은 사람이 <b>승인 기록</b>을 누름", "연습에서는 메모 칸에 '메일 승인'처럼 적고 <b>승인 기록</b>을 누름. 1차 승인이 기록되고 2차 승인 단계로 넘어감", "2차 승인용 메일 문안으로 바뀐 것을 확인하고 같은 방법으로 한 번 더 기록함", "고칠 것이 있으면 사유를 적고 <b>반려</b>를 누름. 반려되면 작성자가 고쳐서 다시 제출함"],
@@ -601,9 +783,12 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
       { view: "analysis", title: "2년치 비교하기", goal: `${cy - 1}년과 ${cy}년 자료를 견주어 흐름을 읽음`,
         how: ["<b>연간 누계</b>를 누름. 1월부터 고른 달까지의 누계를 전년 같은 기간, 연간 예산과 비교함", `연도를 ${cy - 1}년, 기간을 12월까지로 바꾸면 작년 한 해의 예산 대비 실적이 나옴`, `연도를 ${cy}년으로 되돌려 전년 동기간 대비 증감과 예산 소진율을 봄`, "<b>분기</b>를 누르면 전분기, 전년 같은 분기와 비교함. 실적표의 <b>전년 실적</b> 버튼으로도 작년 숫자를 볼 수 있음"],
         check: "연간 누계를 누르고 연도를 한 번 바꿔 봄", done: () => !!(T.flags.yoyY && T.flags.yoyYear), targets: ['#view-analysis [data-t="Y"]', "#anY", "#anK"] },
-      { view: "ai", title: "AI 분석 써 보기", goal: "Claude가 자료를 읽고 쓴 분석 보고를 받아 봄",
-        how: ["기간을 고르고 <b>AI 분석 실행</b>을 누름. 보통 20초에서 1분 걸림", "<b>분석 저장(공유)</b>을 누르면 다른 사람도 그 분석을 볼 수 있음", "아래 'AI에게 질문'에서 이어서 물어볼 수 있음", "AI를 쓸 수 없다고 나오면 이 단계는 읽기만 하고 넘어감"],
-        check: "AI 분석 화면을 열어 봄", done: () => !!T.seen.ai, targets: ["#aiRun"] },
+      { view: "ai", title: "AI 분석 써 보기", goal: "분석 보고를 받아 저장하고, 이어서 질문해 봄",
+        how: ["기간을 고르고 <b>AI 분석 실행</b>을 누름. 보고가 위에서부터 차례로 써짐", "<b>분석 저장(공유)</b>을 누르면 오른쪽 '저장된 분석'에 남아 다른 사람도 볼 수 있음", "아래 'AI에게 질문'에 항목 이름을 넣어 물어봄. <b>예시 질문 넣기</b>를 누르면 질문이 채워지고, '보내기'를 누르면 답이 옴",
+          AIP.mode === "real" ? "claude.ai에서 연 연습판이라 실제 Claude가 답함. 호출이 되지 않으면 연습용 응답으로 바뀜" : "이 연습판은 실제 AI를 부르지 않고 화면의 수치로 만든 연습용 응답을 보여 줌. 실제 시스템에서는 Claude가 직접 쓰며 보통 20초에서 1분 걸림",
+          "실제 시스템에서는 기준정보의 'AI 설정'에 Claude API 키를 넣은 브라우저에서만 AI 분석이 실행됨"],
+        acts: [{ label: "예시 질문 넣기", run: fillQuestion, help: "지금 기간에서 예산과 차이가 가장 큰 지출 항목으로 질문을 만들어 질문 칸에 넣음. 보내기는 직접 누름" }],
+        check: "AI 분석 실행을 눌러 보고를 끝까지 받아 봄", done: () => !!T.flags.aiRun, targets: ["#aiRun", "#aiSave", "#chatIn"] },
       { view: "rules", title: "기준정보 살펴보기", goal: "자동 분류가 어떤 기준으로 되는지 봄",
         how: ["계정 기본 매핑, 적요 문구 규칙, 표준 적요, 점검 기준을 봄", "분류는 항목 직접지정, 적요 문구 규칙, 계정 기본 매핑 순서로 정해짐", "<b>수정</b>을 누르면 고칠 수 있음. 실제 시스템에서는 관리자만 고침"],
         check: "기준정보 화면을 열어 봄", done: () => !!T.seen.rules, targets: ["#rEdit"] },
@@ -703,7 +888,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     ["#bXls", "엑셀 내보내기", "지금 화면의 예산을 엑셀 파일로 받음"],
     ["#bSave", "저장", "작성 중인 예산을 저장함. 제출 전까지 여러 번 저장할 수 있음"],
     ["#bSubmit", "저장 후 제출", "저장하고 제출 일자를 기록함. 제출하면 승인 단계로 넘어가고 회수하기 전까지 고칠 수 없음. 미분류 줄이 있으면 저장만 됨"],
-    ["#fDoc", "승인 요청서 받기(엑셀)", "예산 요약, 운영 통장 입금 요청액, 항목별 예산, 예산 상세가 든 엑셀 파일을 받음. 승인 요청 메일에 첨부함"],
+    ["#fDoc", "승인 요청서 받기(엑셀)", "보고서 서식의 승인 요청서를 엑셀로 받음. 첫 장은 결재란, 핵심 숫자, 추정손익 요약, 입금 요청액 산출이 든 한 장 보고서이고 뒤에 항목별 예산과 예산상세 시트가 있음. 승인 요청 메일에 첨부함"],
     ["#fMailBox", "메일 문안", "승인이나 입금을 요청하는 메일 본문. 금액과 사이트 주소가 자동으로 들어감"],
     ["#fMail", "문안 복사", "메일 문안을 복사함. 메일 본문에 붙여넣어 보냄"],
     ["#fMailto", "메일 앱 열기", "PC에 설정된 메일 프로그램으로 제목과 본문이 채워진 새 메일을 엶. 메일 프로그램이 없으면 문안 복사를 씀"],
@@ -768,7 +953,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     ['#view-ai [data-t="Y"]', "연간 누계", "1월부터 고른 달까지의 누계로 분석함"],
     ["#aiY", "연도", "분석할 연도를 고름"],
     ["#aiK", "기간", "분석할 월이나 분기를 고름"],
-    ["#aiRun", "AI 분석 실행", "고른 기간의 예산, 실적, 원장 적요, 차이사유를 Claude가 읽고 분석 보고를 씀. 보통 20초에서 1분 걸림"],
+    ["#aiRun", "AI 분석 실행", "고른 기간의 예산, 실적, 원장 적요, 차이사유로 분석 보고를 씀. 연습판에서는 연습용 응답이 바로 나오고, 실제 시스템에서는 Claude가 써서 보통 20초에서 1분 걸림"],
     ["#aiStop", "중지", "진행 중인 분석을 멈춤. 멈춘 답변은 저장되지 않음"],
     ["#aiSave", "분석 저장(공유)", "분석 결과를 저장해 다른 사람도 보게 함"],
     ["#view-ai .list button", "저장된 분석", "저장해 둔 분석을 다시 봄"],
@@ -838,6 +1023,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     if (!T.ym) return;
     if (!T.seen[view]) { T.seen[view] = true; save(); }
     const c = document.querySelector("#conn span"); if (c && S.conn === "on") c.textContent = "연습 모드";
+    if (view === "ai") paintAi();
     hideTip(); applyHelp(); paintHelpList(); paintTut(); paintHl(); paintNote();
   }
   EXT.afterRender = afterRender;
@@ -865,7 +1051,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     window.scrollTo(0, 0); toast("리셋했음. 1단계부터 다시 시작함");
   }
   byId("tReset").onclick = () => askReset();
-  window.BDB_TRAIN = { T, HELP, steps, status, ledgerText, pm };
+  window.BDB_TRAIN = { T, HELP, steps, status, ledgerText, pm, ai: AIP, practiceReport, practiceAnswer };
 })();
 </script>
 <script>
@@ -1513,7 +1699,232 @@ function budgetRows(bd) {
   bd.lines.forEach(l => { const c = classify(S.cfg, l.acct, l.memo, l.ovr); rows.push([bd.ym, l.acct, l.memo, groupOf(c.item), c.item, hasVal(l.qty) ? num(l.qty) : "", hasVal(l.price) ? num(l.price) : "", hasVal(l.direct) ? num(l.direct) : "", budgetAmt(l), l.basis || "", l.ovr || ""]); });
   return rows;
 }
-function exportApproval(bd, doc) {
+// ===== 승인 요청서(엑셀, 보고서 서식) =====
+// 서식 도구(ExcelJS)는 승인 요청서를 받을 때만 불러옴. 불러오지 못하면 서식 없는 기본 표로 저장함
+const XJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+let XJS_P = null;
+function loadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (!XJS_P) {
+    XJS_P = new Promise((res, rej) => {
+      const s = document.createElement("script"), t = setTimeout(() => rej(new Error("ExcelJS")), 15000);
+      s.src = XJS_URL; s.async = true;
+      s.onload = () => { clearTimeout(t); window.ExcelJS ? res(window.ExcelJS) : rej(new Error("ExcelJS")); };
+      s.onerror = () => { clearTimeout(t); rej(new Error("ExcelJS")); };
+      document.head.appendChild(s);
+    });
+    XJS_P.catch(() => { XJS_P = null; });
+  }
+  return XJS_P;
+}
+// 금액을 '4억 7,777만 원'처럼 읽기 쉽게 적음(만 원 미만 반올림)
+function eokTxt(v) {
+  const n = Math.round(Math.abs(v || 0) / 10000); if (!n) return "0원";
+  const e = Math.floor(n / 10000), m = n % 10000, f = x => x.toLocaleString("ko-KR");
+  return (v < 0 ? "△" : "") + (e ? f(e) + "억" + (m ? " " + f(m) + "만" : "") : f(m) + "만") + " 원";
+}
+const eokDiff = v => (v > 0 ? "+" : "") + eokTxt(v);
+const pctTxt = v => (v < 0 ? "△" : "") + Math.abs((v || 0) * 100).toFixed(1) + "%";
+// 화면 자료에서 승인 요청서에 들어갈 값만 뽑음
+function approvalModel(bd, doc) {
+  const f = S.cfg.flow, fl = (doc && doc.flow) || {}, fc = fundCalc(S.cfg, bd.lines), A = agg(), k = bd.ym, day = x => String(x || "").slice(0, 10), idx = BST.indexOf(bState(doc));
+  const by = {}, basis = {}; let unc = 0, uncAmt = 0;
+  bd.lines.forEach(l => {
+    if (!l.acct) return; const it = classify(S.cfg, l.acct, l.memo, l.ovr).item, a = budgetAmt(l);
+    if (it === "미분류") { if (a) { unc++; uncAmt += a; } return; }
+    by[it] = (by[it] || 0) + a;
+    if (l.basis && (!basis[it] || Math.abs(a) > basis[it].a)) basis[it] = { a: Math.abs(a), t: `${l.memo}: ${l.basis}` };
+  });
+  const pk = ymAdd(k, -1), yk = ymAdd(k, -12), pb = A.bud[pk] || {}, ya = A.act[yk] || {};
+  const cur = rowVals(it => by[it] || 0), prev = rowVals(it => pb[it] || 0), yoy = rowVals(it => ya[it] || 0);
+  const hasPrev = LEAVES.some(it => pb[it]), hasYoy = LEAVES.some(it => ya[it]);
+  const sg = (role, kf, mark, date) => ({ role, title: f[kf].title || "", name: f[kf].name || "", mark: mark || "", date: date || "" });
+  const ap = x => (x ? (x.via === "proxy" ? "메일 승인" : "승인") : "");
+  const sign = [sg("작성", "author", idx >= 2 ? "제출" : "", idx >= 2 ? day(doc.lastSubmittedAt || doc.submittedAt) : ""), sg("1차 승인", "a1", ap(fl.a1), day(fl.a1 && fl.a1.at)), sg("2차 승인", "a2", ap(fl.a2), day(fl.a2 && fl.a2.at)), sg("입금 확인", "fund", fl.fund ? "입금" : "", day(fl.fund && fl.fund.date))];
+  const pl = ["매출액", "고정지출", "유동지출", "판매비와 일반관리비", "영업이익(직접)"].map(lb => ({ lb: lb === "영업이익(직접)" ? "영업이익" : lb, cur: cur[lb], prev: prev[lb], yoy: yoy[lb], strong: TOTALS.has(lb), key: lb === "영업이익(직접)" }));
+  pl.push({ lb: "영업이익률", ratio: true, cur: cur["영업이익률"], prev: prev["영업이익률"], yoy: yoy["영업이익률"] });
+  const names = c => fc.items.filter(x => x.cls === c && x.amt).map(x => x.item), etc = fc.items.filter(x => x.cls && x.cls !== "인건비" && x.cls !== "임차료" && x.amt).map(x => x.item);
+  const all = LEAVES.map(it => ({ item: it, group: groupOf(it), cur: by[it] || 0, prev: pb[it] || 0, basis: (basis[it] || {}).t || "", cls: FUND_CLS.includes(S.cfg.fund[it]) ? S.cfg.fund[it] : "" })).filter(x => x.cur || x.prev);
+  const top = (hasPrev ? all.filter(x => x.cur - x.prev).sort((a, b) => Math.abs(b.cur - b.prev) - Math.abs(a.cur - a.prev)) : all.filter(x => x.cur).sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur))).slice(0, 5);
+  const notes = [], via = x => (x.via === "proxy" ? "메일 승인 기록" : "직접 승인") + (x.note ? ": " + x.note : "");
+  if (fl.reject) notes.push([`반려(${(f[fl.reject.step] || {}).title || ""})`, day(fl.reject.at), fl.reject.note || ""]);
+  if (fl.a1) notes.push([`1차 승인(${f.a1.title})`, day(fl.a1.at), via(fl.a1)]);
+  if (fl.a2) notes.push([`2차 승인(${f.a2.title})`, day(fl.a2.at), via(fl.a2)]);
+  if (fl.fund) notes.push(["운영 통장 입금", day(fl.fund.date), `${wonTxt(fl.fund.amt)}원 입금 확인` + (fl.fund.note ? ": " + fl.fund.note : "")]);
+  return { org: "부산대성기숙학원", ym: k, label: ymLabel(k), due: dueOf(k), state: bStateLabel(S.cfg, doc), today: today(), done: idx >= 4, hasPrev, hasYoy, sign, pl,
+    kpi: { rev: cur["매출액"], cost: cur["판매비와 일반관리비"], op: cur["영업이익(직접)"], rate: cur["영업이익률"], req: fc.req, dRev: cur["매출액"] - prev["매출액"], dCost: cur["판매비와 일반관리비"] - prev["판매비와 일반관리비"], dOp: cur["영업이익(직접)"] - prev["영업이익(직접)"] },
+    fund: { spend: fc.spend, labor: fc.인건비, rent: fc.임차료, etc: fc.기타, req: fc.req, laborNames: names("인건비"), rentNames: names("임차료"), etcNames: etc },
+    top, items: all, notes, unc, uncAmt, lines: budgetRows(bd), site: siteUrl() + "#budget" };
+}
+// 승인 요청서 통합 문서를 만듦. XJ는 ExcelJS, M은 approvalModel의 결과
+function buildApprovalBook(XJ, M) {
+  const C = { navy: "FF1F3864", mid: "FF2E5597", pale: "FFE9EFF7", gray: "FFF2F2F2", line: "FFBFBFBF", ink: "FF222222", mute: "FF666666", white: "FFFFFFFF" };
+  const FONT = "맑은 고딕", NUM = "#,##0;△#,##0;-", DIF = "+#,##0;△#,##0;-", PCT = "0.0%;△0.0%;-", DPC = "+0.0%;△0.0%;-";
+  const wb = new XJ.Workbook(); wb.creator = M.org; wb.created = new Date();
+  const side = (c, s) => ({ style: s || "thin", color: { argb: c || C.line } });
+  const vlen = s => { let n = 0; for (const ch of String(s || "")) n += ch.charCodeAt(0) > 255 ? 2 : 1.1; return n; };
+  // 한 칸 또는 합친 칸에 값과 서식을 넣음. 테두리가 칸마다 달라서 서식을 먼저 넣고, 서식을 덮어쓰지 않는 방식으로 합침
+  function put(ws, r, c1, c2, v, o) {
+    o = o || {}; const r2 = o.r2 || r, bx = o.box;
+    for (let i = r; i <= r2; i++) for (let j = c1; j <= c2; j++) {
+      const x = ws.getCell(i, j), b = {};
+      x.font = { name: FONT, size: o.size || 10, bold: !!o.bold, color: { argb: o.color || C.ink } };
+      if (o.fill) x.fill = { type: "pattern", pattern: "solid", fgColor: { argb: o.fill } };
+      x.alignment = { horizontal: o.h || "left", vertical: o.v || "middle", wrapText: !!o.wrap, indent: o.indent || 0 };
+      if (o.fmt) x.numFmt = o.fmt;
+      if (i === r && (bx || o.top)) b.top = bx || o.top;
+      if (i === r2 && (bx || o.bottom)) b.bottom = bx || o.bottom;
+      if (j === c1 && (bx || o.left)) b.left = bx || o.left;
+      if (j === c2 && (bx || o.right)) b.right = bx || o.right;
+      if (Object.keys(b).length) x.border = b;
+    }
+    if (c2 > c1 || r2 > r) ws.mergeCellsWithoutStyle(r, c1, r2, c2);
+    if (v != null && v !== "") ws.getCell(r, c1).value = v;
+  }
+  const page = (o, extra) => Object.assign({ paperSize: 9, orientation: o, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: 0.45, right: 0.45, top: 0.5, bottom: 0.5, header: 0.25, footer: 0.25 } }, extra || {});
+  const TH = { size: 9.5, bold: true, color: C.white, fill: C.navy, h: "center" };
+
+  // ---------- 1 승인요청서 (A4 세로 한 장) ----------
+  const ws = wb.addWorksheet("승인요청서", { views: [{ showGridLines: false }], pageSetup: page("portrait", { fitToHeight: 1 }) });
+  [9, 9, 9, 9, 9, 9, 9, 4.5, 11.5, 11.5, 11.5, 11.5].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  const H = (r, h) => { ws.getRow(r).height = h; };
+  const sec = (r, t, unit) => { const b = side(C.navy, "medium"); put(ws, r, 1, unit ? 9 : 12, t, { size: 11.5, bold: true, color: C.navy, bottom: b }); if (unit) put(ws, r, 10, 12, unit, { size: 8.5, color: C.mute, h: "right", v: "bottom", bottom: b }); H(r, 23); };
+  const k = M.kpi, F = M.fund;
+  put(ws, 1, 1, 12, null, { fill: C.navy }); H(1, 6);
+  put(ws, 2, 1, 7, M.org, { size: 10.5, bold: true, color: C.mid, v: "bottom" });
+  put(ws, 3, 1, 7, `${M.label} 예산 승인 요청서`, { r2: 5, size: 20, bold: true, color: C.navy });
+  put(ws, 6, 1, 7, `출력일 ${M.today}`, { size: 8.5, color: C.mute });
+  const bx = side(C.mute);
+  put(ws, 2, 8, 8, "결\n재", { r2: 6, size: 9.5, bold: true, fill: C.gray, h: "center", wrap: true, box: bx });
+  M.sign.forEach((s, i) => {
+    const c = 9 + i;
+    put(ws, 2, c, c, s.role, { size: 9, bold: true, fill: C.gray, h: "center", box: bx });
+    put(ws, 3, c, c, s.title, { size: 8, color: C.mute, h: "center", wrap: true, top: bx, left: bx, right: bx });
+    put(ws, 4, c, c, s.name, { size: 9.5, bold: true, h: "center", left: bx, right: bx, bottom: bx });
+    put(ws, 5, c, c, s.mark, { size: 11, bold: true, color: C.navy, h: "center", wrap: true, box: bx });
+    put(ws, 6, c, c, s.date, { size: 8, color: C.mute, h: "center", box: bx });
+  });
+  H(2, 17); H(3, 26); H(4, 17); H(5, 31); H(6, 15); H(7, 9);
+  // 문서 정보 띠
+  const lab = { size: 9.5, bold: true, fill: C.gray, h: "center", box: side() }, val = { size: 9.5, h: "center", box: side(), wrap: true };
+  put(ws, 8, 1, 2, "대상 연월", lab); put(ws, 8, 3, 4, M.label, val); put(ws, 8, 5, 6, "제출 기한", lab); put(ws, 8, 7, 8, M.due, val); put(ws, 8, 9, 9, "진행 상태", lab); put(ws, 8, 10, 12, M.state, val);
+  H(8, 22); H(9, 9);
+  // 1 요지
+  let r = 10; sec(r, "1 승인 요청 요지"); r++;
+  const says = [`가. ${M.label} 예산을 매출 ${eokTxt(k.rev)}, 지출 ${eokTxt(k.cost)}, 영업이익 ${eokTxt(k.op)}(영업이익률 ${pctTxt(k.rate)})으로 편성함`,
+    `나. 운영 통장 입금 요청액은 ${eokTxt(F.req)}임. 지출 예산에서 관리 통장이 직접 지급하는 인건비 ${eokTxt(F.labor)}, 임차료 ${eokTxt(F.rent)}과 기타 제외 ${eokTxt(F.etc)}을 뺀 금액임`,
+    M.hasPrev ? `다. 전월 예산과 비교하면 매출 ${eokDiff(k.dRev)}, 지출 ${eokDiff(k.dCost)}, 영업이익 ${eokDiff(k.dOp)} 변동임` : "다. 전월 예산이 없어 전월 대비 증감은 표시하지 않음"];
+  if (M.unc) says.push(`라. 분류되지 않은 예산 ${M.unc}줄(${eokTxt(M.uncAmt)})은 합계에 들어 있지 않음. 계정과 적요 확인 필요`);
+  says.forEach((t, i) => { put(ws, r, 1, 12, t, { size: 10, wrap: true, indent: 1, v: i ? "middle" : "bottom" }); H(r, Math.max(1, Math.ceil(vlen(t) / 118)) * 15 + (i ? 3 : 7)); r++; });
+  H(r, 9); r++;
+  // 핵심 숫자 4칸
+  const cards = [["매출 예산", k.rev, M.hasPrev ? `전월 대비 ${eokDiff(k.dRev)}` : "전월 예산 없음"], ["지출 예산", k.cost, M.hasPrev ? `전월 대비 ${eokDiff(k.dCost)}` : "전월 예산 없음"], ["예상 영업이익", k.op, `영업이익률 ${pctTxt(k.rate)}`], ["운영 통장 입금 요청액", F.req, F.spend ? `지출 예산의 ${(F.req / F.spend * 100).toFixed(1)}%` : ""]];
+  cards.forEach(([t, v, s], i) => {
+    const c1 = 1 + i * 3, c2 = c1 + 2, on = i === 3, bg = on ? C.navy : C.pale, e = side(on ? C.navy : C.line);
+    put(ws, r, c1, c2, t + "(원)", { size: 9, bold: true, color: on ? C.white : C.mute, fill: bg, h: "center", v: "bottom", top: e, left: e, right: e });
+    put(ws, r + 1, c1, c2, Math.round(v), { size: 17, bold: true, color: on ? C.white : C.navy, fill: bg, h: "center", fmt: NUM, left: e, right: e });
+    put(ws, r + 2, c1, c2, s, { size: 8.5, color: on ? C.white : C.mute, fill: bg, h: "center", v: "top", left: e, right: e, bottom: e });
+  });
+  H(r, 19); H(r + 1, 31); H(r + 2, 19); r += 3; H(r, 11); r++;
+  // 2 추정손익 요약
+  sec(r, "2 추정손익 요약", "(단위: 원)"); r++;
+  const head = (rr, cols) => { cols.forEach(([c1, c2, t]) => put(ws, rr, c1, c2, t, TH)); H(rr, 21); };
+  head(r, [[1, 3, "구분"], [4, 5, "이번 예산"], [6, 7, "전월 예산"], [8, 9, "증감"], [10, 10, "증감률"], [11, 12, "전년 동월 실적"]]); r++;
+  M.pl.forEach((p, i) => {
+    const last = i === M.pl.length - 1, o = { size: 10, bold: !!p.strong, fill: p.key ? C.pale : null, bottom: last ? side(C.navy, "medium") : side() }, n = x => Object.assign({}, o, { h: "right" }, x);
+    put(ws, r, 1, 3, p.lb, Object.assign({}, o, { indent: p.strong || p.ratio ? 1 : 2, color: p.ratio ? C.mute : C.ink }));
+    if (p.ratio) {
+      put(ws, r, 4, 5, p.cur, n({ fmt: PCT })); put(ws, r, 6, 7, M.hasPrev ? p.prev : "-", n({ fmt: PCT }));
+      put(ws, r, 8, 9, M.hasPrev ? `${p.cur - p.prev > 0 ? "+" : p.cur - p.prev < 0 ? "△" : ""}${Math.abs((p.cur - p.prev) * 100).toFixed(1)}%p` : "-", n()); put(ws, r, 10, 10, "", n()); put(ws, r, 11, 12, M.hasYoy ? p.yoy : "-", n({ fmt: PCT }));
+    } else {
+      put(ws, r, 4, 5, Math.round(p.cur), n({ fmt: NUM })); put(ws, r, 6, 7, M.hasPrev ? Math.round(p.prev) : "-", n({ fmt: NUM }));
+      put(ws, r, 8, 9, M.hasPrev ? Math.round(p.cur - p.prev) : "-", n({ fmt: DIF })); put(ws, r, 10, 10, M.hasPrev && p.prev ? (p.cur - p.prev) / Math.abs(p.prev) : "-", n({ fmt: DPC })); put(ws, r, 11, 12, M.hasYoy ? Math.round(p.yoy) : "-", n({ fmt: NUM }));
+    }
+    H(r, 20); r++;
+  });
+  H(r, 11); r++;
+  // 3 운영 통장 입금 요청액 산출
+  sec(r, "3 운영 통장 입금 요청액 산출", "(단위: 원)"); r++;
+  head(r, [[1, 4, "구분"], [5, 6, "금액"], [7, 12, "내용"]]); r++;
+  const list = a => (a.length > 4 ? a.slice(0, 4).join(", ") + ` 등 ${a.length}개 항목` : a.join(", "));
+  [["지출 예산 합계", F.spend, "고정지출과 유동지출을 더한 금액"], ["(-) 인건비", F.labor, F.laborNames.length ? "관리 통장에서 직접 지급: " + list(F.laborNames) : "해당 없음"], ["(-) 임차료", F.rent, F.rentNames.length ? "관리 통장에서 직접 지급: " + list(F.rentNames) : "해당 없음"], ["(-) 기타 제외", F.etc, F.etcNames.length ? "돈이 나가지 않는 항목 등: " + list(F.etcNames) : "해당 없음"]].forEach(([t, v, s]) => {
+    put(ws, r, 1, 4, t, { size: 10, indent: 1, bottom: side() }); put(ws, r, 5, 6, Math.round(v), { size: 10, h: "right", fmt: NUM, bottom: side() }); put(ws, r, 7, 12, s, { size: 9, color: C.mute, indent: 1, wrap: true, bottom: side() });
+    H(r, vlen(s) > 62 ? 30 : 20); r++;
+  });
+  put(ws, r, 1, 4, "운영 통장 입금 요청액", { size: 11, bold: true, color: C.white, fill: C.navy, indent: 1 }); put(ws, r, 5, 6, Math.round(F.req), { size: 12, bold: true, color: C.white, fill: C.navy, h: "right", fmt: NUM }); put(ws, r, 7, 12, "승인이 끝나면 관리 통장에서 운영 통장으로 입금함", { size: 9, color: C.white, fill: C.navy, indent: 1 });
+  H(r, 24); r++; H(r, 11); r++;
+  // 4 증감이 큰 항목
+  sec(r, M.hasPrev ? "4 전월 예산 대비 증감이 큰 항목" : "4 금액이 큰 항목", "(단위: 원)"); r++;
+  head(r, [[1, 3, "항목"], [4, 5, "이번 예산"], [6, 7, "전월 예산"], [8, 9, "증감"], [10, 12, "주요 산출근거"]]); r++;
+  if (!M.top.length) { put(ws, r, 1, 12, "해당 항목 없음", { size: 9.5, color: C.mute, h: "center", bottom: side(C.navy, "medium") }); H(r, 20); r++; }
+  M.top.forEach((t, i) => {
+    const b = i === M.top.length - 1 ? side(C.navy, "medium") : side();
+    put(ws, r, 1, 3, `${t.item} (${t.group})`, { size: 10, indent: 1, bottom: b }); put(ws, r, 4, 5, Math.round(t.cur), { size: 10, h: "right", fmt: NUM, bottom: b });
+    put(ws, r, 6, 7, M.hasPrev ? Math.round(t.prev) : "-", { size: 10, h: "right", fmt: NUM, bottom: b }); put(ws, r, 8, 9, M.hasPrev ? Math.round(t.cur - t.prev) : "-", { size: 10, h: "right", fmt: DIF, bottom: b });
+    put(ws, r, 10, 12, t.basis || "산출근거 미입력", { size: 8.5, color: C.mute, indent: 1, wrap: true, bottom: b });
+    H(r, vlen(t.basis) > 36 ? 28 : 20); r++;
+  });
+  H(r, 11); r++;
+  // 5 승인 의견과 처리 기록
+  sec(r, "5 승인 의견과 처리 기록"); r++;
+  M.notes.forEach(([w, d, t]) => { put(ws, r, 1, 3, w, { size: 9.5, bold: true, indent: 1, bottom: side() }); put(ws, r, 4, 5, d, { size: 9.5, h: "center", bottom: side() }); put(ws, r, 6, 12, t, { size: 9.5, wrap: true, bottom: side() }); H(r, vlen(t) > 70 ? 30 : 20); r++; });
+  if (!M.done) { put(ws, r, 1, 2, "승인 의견", { r2: r + 1, size: 9.5, bold: true, fill: C.gray, h: "center", box: side() }); put(ws, r, 3, 12, null, { r2: r + 1, box: side() }); H(r, 22); H(r + 1, 22); r += 2; }
+  else if (!M.notes.length) { put(ws, r, 1, 12, "기록 없음", { size: 9.5, color: C.mute, h: "center", bottom: side() }); H(r, 20); r++; }
+  H(r, 7); r++;
+  put(ws, r, 1, 12, `항목별 예산은 '항목별 예산' 시트, 줄 단위 내역은 '예산상세' 시트에 있음. 확인 주소 ${M.site}`, { size: 8, color: C.mute }); H(r, 15);
+  ws.pageSetup.printArea = `A1:L${r}`;
+
+  // ---------- 2 항목별 예산 ----------
+  const w2 = wb.addWorksheet("항목별 예산", { views: [{ showGridLines: false, state: "frozen", ySplit: 4 }], pageSetup: page("portrait") });
+  [10, 26, 17, 17, 17, 11, 30].forEach((w, i) => { w2.getColumn(i + 1).width = w; });
+  put(w2, 1, 1, 7, `${M.label} 항목별 예산`, { size: 14, bold: true, color: C.navy }); w2.getRow(1).height = 26;
+  put(w2, 2, 1, 5, `${M.org}, 진행 상태 ${M.state}`, { size: 9, color: C.mute }); put(w2, 2, 6, 7, "(단위: 원)", { size: 8.5, color: C.mute, h: "right" });
+  w2.getRow(3).height = 6;
+  ["구분", "실적표 항목", "이번 예산", "전월 예산", "증감", "증감률", "입금 구분"].forEach((t, i) => put(w2, 4, i + 1, i + 1, t, TH)); w2.getRow(4).height = 21;
+  let q = 5;
+  const line2 = (g, name, c, p, cls, o) => {
+    o = Object.assign({ size: 10, bottom: side() }, o || {}); const n = x => Object.assign({}, o, { h: "right" }, x);
+    put(w2, q, 1, 1, g, Object.assign({}, o, { h: "center" })); put(w2, q, 2, 2, name, Object.assign({}, o, { indent: 1 }));
+    put(w2, q, 3, 3, Math.round(c), n({ fmt: NUM })); put(w2, q, 4, 4, M.hasPrev ? Math.round(p) : "-", n({ fmt: NUM })); put(w2, q, 5, 5, M.hasPrev ? Math.round(c - p) : "-", n({ fmt: DIF }));
+    put(w2, q, 6, 6, M.hasPrev && p ? (c - p) / Math.abs(p) : "-", n({ fmt: DPC })); put(w2, q, 7, 7, cls, Object.assign({}, o, { size: 9, color: C.mute, indent: 1 }));
+    w2.getRow(q).height = 19; q++;
+  };
+  ["매출", "고정비", "변동비", "이익조정"].forEach(g => {
+    const rows = M.items.filter(x => x.group === g); if (!rows.length) return;
+    rows.forEach(x => line2(g, x.item, x.cur, x.prev, g === "고정비" || g === "변동비" ? (x.cls ? x.cls + "(입금 요청 제외)" : "입금 요청") : ""));
+    line2("", g + " 합계", rows.reduce((s, x) => s + x.cur, 0), rows.reduce((s, x) => s + x.prev, 0), "", { bold: true, fill: C.gray });
+  });
+  const op = M.pl.find(p => p.key);
+  if (op) line2("", "영업이익", op.cur, op.prev, "매출 합계 - 고정비 합계 - 변동비 합계", { bold: true, fill: C.pale, bottom: side(C.navy, "medium") });
+  w2.pageSetup.printTitlesRow = "4:4"; w2.headerFooter.oddFooter = "&C&8&P / &N";
+
+  // ---------- 3 예산상세 ----------
+  const w3 = wb.addWorksheet("예산상세", { views: [{ showGridLines: false, state: "frozen", ySplit: 1 }], pageSetup: page("landscape") });
+  [9, 18, 32, 8, 20, 8, 12, 14, 14, 30, 14].forEach((w, i) => { w3.getColumn(i + 1).width = w; });
+  M.lines.forEach((row, i) => {
+    row.forEach((v, j) => {
+      if (!i) { put(w3, 1, j + 1, j + 1, v, TH); return; }
+      const isN = j >= 5 && j <= 8;
+      put(w3, i + 1, j + 1, j + 1, v, { size: 9.5, h: isN ? "right" : j === 0 || j === 3 ? "center" : "left", indent: isN || j === 0 || j === 3 ? 0 : 1, fmt: isN ? "#,##0" : null, bold: j === 8, wrap: j === 2 || j === 9, v: "middle", bottom: side() });
+    });
+    w3.getRow(i + 1).height = i ? Math.min(4, Math.max(1, Math.ceil(vlen(row[2]) / 32), Math.ceil(vlen(row[9]) / 30))) * 14 + 4 : 21;
+  });
+  if (M.lines.length > 1) w3.autoFilter = { from: { row: 1, column: 1 }, to: { row: M.lines.length, column: M.lines[0].length } };
+  w3.pageSetup.printTitlesRow = "1:1"; w3.headerFooter.oddFooter = "&C&8&P / &N";
+  return wb;
+}
+async function exportApproval(bd, doc) {
+  if (!dls || DLS_OFF) { toast("이 화면에서는 파일을 내려받을 수 없음"); return; }
+  if (U.xbusy) return; U.xbusy = true; toast("승인 요청서를 만드는 중");
+  try {
+    let XJ = null; try { XJ = await loadExcelJS(); } catch (e) { XJ = null; }
+    if (!XJ) { toast("서식 도구를 불러오지 못해 기본 표로 저장함"); exportApprovalPlain(bd, doc); return; }
+    const buf = await buildApprovalBook(XJ, approvalModel(bd, doc)).xlsx.writeBuffer();
+    await saveData(`부산대성_예산승인요청서_${bd.ym}.xlsx`, new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  } catch (e) { console.error(e); toast("승인 요청서를 만들지 못함"); }
+  finally { U.xbusy = false; }
+}
+function exportApprovalPlain(bd, doc) {
   if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
   const f = S.cfg.flow, fl = (doc && doc.flow) || {}, fc = fundCalc(S.cfg, bd.lines), A = agg(), k = bd.ym, day = x => String(x || "").slice(0, 10);
   const by = {}; bd.lines.forEach(l => { if (!l.acct) return; const it = classify(S.cfg, l.acct, l.memo, l.ovr).item; by[it] = (by[it] || 0) + budgetAmt(l); });
@@ -2099,8 +2510,13 @@ function canExport() { return !!window.XLSX && !!dls && !DLS_OFF; }
 async function saveXlsx(wb, name) {
   if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
   if (!dls || DLS_OFF) { toast("이 화면에서는 파일을 내려받을 수 없음"); return; }
-  if (S.demo) name = "예시_" + name;
-  try { const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }); await dls.save({ filename: name + ".xlsx", data: new Blob([buf]) }); }
+  let buf; try { buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }); } catch (e) { toast("파일을 저장하지 못함"); return; }
+  await saveData(name + ".xlsx", new Blob([buf]));
+}
+async function saveData(filename, blob) {
+  if (!dls || DLS_OFF) { toast("이 화면에서는 파일을 내려받을 수 없음"); return; }
+  if (S.demo) filename = "예시_" + filename;
+  try { await dls.save({ filename, data: blob }); }
   catch (e) {
     const c = e && e.code;
     if (c === "declined") return;
