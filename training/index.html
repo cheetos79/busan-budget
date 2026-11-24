@@ -304,7 +304,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
    앱 본체 스크립트보다 먼저 실행됨. 앱의 전역(S, U, render, classify 등)은 함수가 불릴 때 참조함 */
 (function () {
   "use strict";
-  const LS = "bdb-train-v1";
+  const LS = "bdb-train-v2";
   const REAL_URL = "https://cheetos79.github.io/busan-budget/";
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const copy = o => JSON.parse(JSON.stringify(o));
@@ -352,8 +352,96 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
   });
   const localDb = { doc: docRef, collection: colRef };
 
-  // 예시 자료: 앱의 예시 생성기를 그대로 쓰고, 연습할 달(다음 달 예산, 지난달 실적)만 비워 둠
-  const demo = () => T.demo || (T.demo = makeDemo(prepCfg(DEFAULT_CFG)));
+  // 예시 자료를 저장소에 넣음. 연습할 달(다음 달 예산, 지난달 실적)만 비워 둠
+  // 예시 자료 생성: 올해 연간 계획을 매출 50.0억 원, 판관비 45.0억 원, 영업이익 5.0억 원으로 잡고 작년(매출 약 46억 원)까지 2년치를 만듦
+  // 금액은 모두 가짜임. 같은 달에는 항상 같은 결과가 나오도록 정해진 난수를 씀
+  function trainData(cfg) {
+    let sd = 20261; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+    // 올해 연간 계획(억 원)
+    const PLAN = { 종합: 46.2, 단과: 1.6, 모의고사: 1.4, "모의고사 매출대체": 0.5, 카페포인트: 0.6, 이러닝AFP: -0.2, 홈페이지용역수수료: -0.1,
+      감가상각비: 2.4, "임대료(학원)": 7.2, 관리비: 0.9, "관리비(수도광열비등)": 1.8, 시설설치비: 0.3, 강사급여: 11.4, 출장강사: 0.9, 특강료: 0.8, 성과급: 0.5, 직원급여: 6.6, "4대보험": 0.7, 퇴직충당금: 0.55, 차량유지비: 0.25,
+      용역비: 1.5, 광고선전비: 2.6, 행사비: 0.3, 공과금: 0.15, 사무용품비: 0.3, 통신비: 0.2, 카드수수료: 0.95, 기타수수료: 1.2, 복리후생비: 1.6, 운영잡비: 0.8, "리스회계 인식": 0.4, 상호사용료원가: 0.7, "이익조정(배분)": 1.2 };
+    // 월별 배분(기숙학원 재수 정규반: 2월 개강, 11월 수능, 1월과 12월은 낮음)
+    const SEASON = [0.4, 0.9, 1, 1, 1, 1, 1, 1, 1, 1, 0.9, 0.35], MOCK = [0.3, 0.6, 1.4, 1, 1, 1.5, 1, 1, 1.6, 1.2, 0.4, 0.2];
+    const WGT = { 종합: SEASON, 카페포인트: SEASON, 이러닝AFP: SEASON, 홈페이지용역수수료: SEASON, 카드수수료: SEASON, 상호사용료원가: SEASON, 사무용품비: SEASON,
+      단과: [0.6, 0.8, 1, 1, 1, 1, 1.5, 1.5, 1, 1, 0.8, 0.5], 모의고사: MOCK, "모의고사 매출대체": MOCK,
+      "관리비(수도광열비등)": [1.5, 1.4, 1, 0.8, 0.8, 0.9, 1.3, 1.4, 1, 0.8, 0.9, 1.3], 시설설치비: [2.5, 2, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 2],
+      강사급여: [0.6, 0.95, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05, 0.95, 0.5], 출장강사: [0.3, 0.8, 1, 1, 1, 1.2, 1.3, 1.3, 1.4, 1.4, 0.8, 0.2],
+      특강료: [0.5, 0.5, 0.8, 0.8, 1, 1.2, 1.5, 1.5, 1.8, 1.6, 0.6, 0.2], 성과급: [0, 3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 6], 용역비: [0.8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.8],
+      광고선전비: [1.8, 1.6, 0.8, 0.6, 0.6, 0.7, 0.8, 0.8, 0.9, 1, 1.6, 2], 행사비: [0.5, 2, 1, 0.5, 1.5, 0.5, 0.5, 0.5, 1, 1.5, 2, 0.5], 복리후생비: [0.7, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.7] };
+    const FLAT = Array(12).fill(1);
+    const share = (it, mi) => { const w = WGT[it] || FLAT; return w[mi] / w.reduce((a, b) => a + b, 0); };
+    const EXACT = new Set(["임대료(학원)", "감가상각비", "리스회계 인식", "이익조정(배분)"]), STEADY = new Set(["강사급여", "직원급여", "4대보험", "퇴직충당금", "관리비"]);
+    const ADJ_ONLY = new Set(["4대보험", "퇴직충당금", "리스회계 인식", "이익조정(배분)", "관리비", "시설설치비", "상호사용료원가", "출장강사", "특강료", "성과급"]);
+    const cy = Number(T.ym.slice(0, 4)), act = ymAdd(T.ym, -1);
+    // 작년은 올해 계획보다 매출 8%, 비용 3~7% 낮게 잡음
+    const yf = (it, yy) => (yy === cy ? 1 : REV.includes(it) ? 0.92 : it === "감가상각비" ? 1 : it === "임대료(학원)" ? 0.97 : it === "직원급여" ? 0.95 : 0.93);
+    const plan = (it, yy, mi) => (PLAN[it] || 0) * 1e8 * share(it, mi) * yf(it, yy);
+    // 분석 연습용으로 일부러 넣은 차이
+    const story = (it, yy, m, k) => {
+      let f = 1;
+      if (yy === cy) {
+        if (it === "종합" && m === 6) f *= 0.95;
+        if (it === "단과" && m === 6) f *= 0.75;
+        if (it === "광고선전비" && m === 9) f *= 1.35;
+        if (it === "광고선전비" && m === 10) f *= 1.45;
+        if (it === "관리비(수도광열비등)" && (m === 7 || m === 8)) f *= 1.18;
+        if (it === "특강료" && m === 9) f *= 1.3;
+        if (it === "강사급여" && m === 3) f *= 0.94;
+        if (it === "복리후생비" && m === 5) f *= 1.25;
+      } else {
+        if (it === "광고선전비" && m === 1) f *= 1.2;
+        if (it === "행사비" && m === 11) f *= 1.4;
+      }
+      if (k === act) { if (it === "광고선전비" && !(yy === cy && (m === 9 || m === 10))) f *= 1.4; if (it === "종합") f *= 0.97; }
+      return f;
+    };
+    const std = cfg.std.map(([a, t]) => ({ a, t, it: classify(cfg, a, t, "").item })).filter(x => x.it && x.it !== "미분류" && x.it !== "제외");
+    const byItem = {}; std.forEach(x => (byItem[x.it] = byItem[x.it] || []).push(x));
+    const pairsAll = it => { if (byItem[it] && byItem[it].length) return byItem[it]; const a = cfg.acct.find(x => x.i === it); return a ? [{ a: a.a, t: it + " 납부", it }] : []; };
+    const pairsLed = it => pairsAll(it).filter(x => x.a !== "원장외 항목" && x.a !== "학원매출");
+    const pw = {}; LEAVES.forEach(it => { pw[it] = pairsLed(it).map(() => 0.5 + rnd()); });
+    const budLines = (yy, mi, f) => {
+      const bl = [];
+      for (const it of LEAVES) {
+        const p = plan(it, yy, mi) * f; if (!p) continue; const ps = pairsAll(it); if (!ps.length) continue;
+        const line = { id: uidStr(), acct: ps[0].a, memo: ps[0].t, qty: "", price: "", direct: "", basis: "", ovr: "" };
+        if (it === "종합") { line.qty = String(Math.round(p / 2500000)); line.price = "2500000"; line.basis = "재원생 수 x 월 수강료"; }
+        else { line.direct = String(Math.round(p / 10000) * 10000); line.basis = REV.includes(it) ? "수강 계획 기준" : groupOf(it) === "고정비" ? "계약, 급여 계획 기준" : "전년 실적과 올해 계획 기준"; }
+        bl.push(line);
+      }
+      return bl;
+    };
+    const B = {}, L = {}, A = {}, R = {};
+    for (const yy of [cy - 1, cy]) for (let mi = 0; mi < 12; mi++) {
+      const k = ym(yy, mi + 1), m = mi + 1, bl = budLines(yy, mi, 1);
+      const day = yy === cy && m === 5 ? "-18" : "-1" + Math.floor(rnd() * 5);
+      B[k] = { ym: k, lines: bl, rev: 1, updatedBy: "seed", updatedAt: ymAdd(k, -1) + day + "T09:00:00.000Z", submittedAt: ymAdd(k, -1) + day, submittedBy: "seed" };
+      if (k > act) continue;
+      const led = [], adj = [];
+      for (const it of LEAVES) {
+        const p = plan(it, yy, mi); if (!p) continue;
+        const amp = EXACT.has(it) ? 0 : STEADY.has(it) ? 0.02 : REV.includes(it) ? 0.03 : 0.1;
+        const v = Math.round(p * (1 + (rnd() * 2 - 1) * amp) * story(it, yy, m, k));
+        if (REV.includes(it) || ADJ_ONLY.has(it)) { adj.push({ item: it, amt: v, src: REV.includes(it) ? "손익계산서(예시)" : "원장 외(예시)", note: "" }); continue; }
+        const ps = pairsLed(it); if (!ps.length) continue;
+        const w = pw[it].map(x => x * (0.85 + rnd() * 0.3)), ws = w.reduce((a, b) => a + b, 0); let left = v;
+        ps.forEach((x, j) => { const part = j === ps.length - 1 ? left : Math.round(v * w[j] / ws); left -= part; led.push({ d: `${k}-${String(1 + Math.floor(rnd() * 27)).padStart(2, "0")}`, a: x.a, m: "부산재수 " + x.t, dr: part, cr: 0, c: cfg.center, ovr: "" }); });
+      }
+      const at = ymAdd(k, 1) + "-10T09:00:00.000Z";
+      L[k] = { ym: k, lines: led, updatedBy: "seed", updatedAt: at }; A[k] = { ym: k, lines: adj, updatedBy: "seed", updatedAt: at };
+    }
+    // 연습할 예산 달이 내년이면 올해 계획에 4%를 얹어 만듦
+    const nb = ymAdd(T.ym, 1); if (!B[nb]) B[nb] = { ym: nb, lines: budLines(cy, Number(nb.slice(5, 7)) - 1, 1.04), rev: 1 };
+    // 예시 차이사유(연습할 달은 비워 둠)
+    const why = (m, item, reason) => { const k = ym(cy, m); if (k >= act) return; (R[k] = R[k] || { ym: k, items: {} }).items[item] = { reason, by: "seed", at: ymAdd(k, 1) + "-12T09:00:00.000Z" }; };
+    why(6, "단과", "여름 특강 개강이 7월로 밀려 6월 수강 인원이 줄었음");
+    why(7, "관리비(수도광열비등)", "폭염으로 냉방 전력 사용이 늘었음");
+    why(9, "광고선전비", "수시 원서접수 기간에 맞춰 온라인 광고를 앞당겨 집행함");
+    why(9, "특강료", "수능 대비 파이널 특강을 추가로 열었음");
+    return { B, L, A, R, AI: {} };
+  }
+  const demo = () => T.demo || (T.demo = trainData(prepCfg(DEFAULT_CFG)));
   const pm = () => ({ bud: ymAdd(T.ym, 1), act: ymAdd(T.ym, -1) });
   function seed() {
     const d = demo(), m = pm(), st = {};
@@ -361,6 +449,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     Object.keys(d.B).forEach(k => { if (k !== m.bud) st["budget/" + k] = copy(d.B[k]); });
     Object.keys(d.L).forEach(k => { if (k !== m.act) st["ledger/" + k] = copy(d.L[k]); });
     Object.keys(d.A).forEach(k => { if (k !== m.act) st["adjust/" + k] = copy(d.A[k]); });
+    Object.keys(d.R).forEach(k => { st["reasons/" + k] = copy(d.R[k]); });
     return st;
   }
   function ensureStore() {
@@ -415,11 +504,12 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
   function onView(view, fn) { const s = steps().find(x => x.view === view); if (U.view === view && (!s || !s.month || s.month())) { fn(); return; } if (s && s.pre) s.pre(); if (U.view !== view) location.hash = "#" + view; else render(); setTimeout(fn, 120); }
   function fillLedger() { onView("actual", () => { const box = byId("pasteBox"); if (!box) return; box.value = ledgerText(); box.focus(); box.scrollIntoView({ block: "center" }); toast("연습용 원장을 붙여넣기 칸에 넣음. '붙여넣은 내용 읽기'를 누름"); }); }
   function downloadLedger() { if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; } const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ledgerRows()), "계정별원장"); saveXlsx(wb, "연습용_계정별원장_" + pm().act); }
+  function fillBudget() { onView("budget", () => { const m = pm(); if (!U.bd || U.bd.ym !== m.bud) return; U.bd.lines = copy((demo().B[m.bud] || { lines: [] }).lines).map(l => Object.assign(l, { id: uidStr() })); U.bd.dirty = true; render(); toast("연습용 예산을 채움. 내용을 확인하고 저장함"); }); }
   function fillAdj() { onView("actual", () => { const m = pm(); if (!U.adj || U.adj.ym !== m.act) return; U.adj.lines = copy((demo().A[m.act] || { lines: [] }).lines).map(l => Object.assign(l, { src: "연습용 금액" })); U.adj.dirty = true; render(); const b = byId("jSave"); if (b) b.scrollIntoView({ block: "center" }); toast("연습용 매출과 원장 외 실적을 채움. 저장 버튼을 누름"); }); }
 
   // ===== 2 튜토리얼 =====
   function steps() {
-    const m = pm(), bud = ymText(m.bud), act = ymText(m.act);
+    const m = pm(), bud = ymText(m.bud), act = ymText(m.act), cy = Number(T.ym.slice(0, 4));
     const sales = ((demo().A[m.act] || {}).lines || []).filter(l => groupOf(l.item) === "매출" && l.amt > 0).sort((a, b) => b.amt - a.amt).slice(0, 2).map(l => `${esc(l.item)} ${n0(l.amt)}원`).join(", ");
     const led = () => (S.L[m.act] && S.L[m.act].lines) || [];
     const budPre = () => { if (!(U.bd && U.bd.dirty)) { U.bym = m.bud; } };
@@ -427,10 +517,11 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     const budMonth = () => U.bym === m.bud, actMonth = () => U.aym === m.act;
     return [
       { view: "dashboard", title: "화면 둘러보기", goal: "화면 구성과 연습판 쓰는 법을 익힘",
-        how: ["위쪽 탭 7개로 화면을 오감. 대시보드, 예산 입력, 실적 입력, 실적표, 분석, AI 분석, 기준정보 순서임", "오른쪽 위 <b>금액 단위</b>에서 원, 천원, 백만원 표시를 바꿈", "버튼에 마우스를 올리면 사용 설명이 뜸. 위쪽 띠의 <b>버튼 설명 보기</b>를 누르면 지금 화면의 버튼 설명을 표로 볼 수 있음", `연습판에는 ${act} 직전까지의 예시 실적과 올해 예시 예산이 들어 있음. 실제 금액이 아님`],
+        how: ["위쪽 탭 7개로 화면을 오감. 대시보드, 예산 입력, 실적 입력, 실적표, 분석, AI 분석, 기준정보 순서임", "오른쪽 위 <b>금액 단위</b>에서 원, 천원, 백만원 표시를 바꿈", "버튼에 마우스를 올리면 사용 설명이 뜸. 위쪽 띠의 <b>버튼 설명 보기</b>를 누르면 지금 화면의 버튼 설명을 표로 볼 수 있음", `연습판에는 ${cy - 1}년 1월부터 ${ymText(ymAdd(m.act, -1))}까지의 예시 실적과 2년치 예시 예산이 들어 있음. 연매출 약 50억 원, 영업이익 약 5억 원 규모로 만든 가짜 금액임`],
         check: "금액 단위나 대시보드의 연도, 월을 한 번 바꿔 봄", done: () => !!T.flags.tour, targets: ["#unit", "#dY", "#dM"] },
       { view: "budget", title: "예산 줄 채우기", goal: `${bud} 예산 표에 줄을 채움. 예산은 대상 월의 전월 15일까지 제출함`, pre: budPre, month: budMonth,
-        how: [`대상 연월이 ${bud}인지 확인함`, "<b>기본 목록 불러오기</b>를 누르면 표준 적요가 계정과 함께 들어감. 금액은 빈칸임", "<b>전월 예산 복사</b>를 누르면 전월과 같은 계정, 적요 줄에 전월 금액이 채워짐"],
+        acts: [{ label: "연습용 예산 채우기", run: fillBudget, help: "연간 계획(매출 약 50억 원, 영업이익 약 5억 원)에 맞춘 이 달 예산을 표에 한 번에 채움. 저장은 직접 누름" }],
+        how: [`대상 연월이 ${bud}인지 확인함`, "<b>기본 목록 불러오기</b>를 누르면 표준 적요가 계정과 함께 들어감. 금액은 빈칸임", "<b>전월 예산 복사</b>를 누르면 전월과 같은 계정, 적요 줄에 전월 금액이 채워짐", "<b>연습용 예산 채우기</b>를 누르면 연간 계획에 맞춘 금액이 한 번에 들어감. 시연할 때나 연간 예산을 계획대로 맞춰 보고 싶을 때 씀"],
         check: `${bud} 예산 표에 줄이 1개 이상 생김`, done: () => (U.bd && U.bd.ym === m.bud && U.bd.lines.length > 0) || !!S.B[m.bud], targets: ["#bStd", "#bCopy"] },
       { view: "budget", title: "계정, 적요, 금액 넣기", goal: "줄을 직접 넣고 자동 분류가 어떻게 되는지 봄", pre: budPre, month: budMonth,
         how: ["<b>줄 추가</b>를 누르고 더존 계정을 고름", "적요를 넣으면 구분(매출, 고정비, 변동비)과 실적표 항목이 자동으로 정해짐. 예: 계정 지급수수료에 적요 '카드결제 수수료'를 넣으면 카드수수료가 됨", "수량과 단가를 넣거나 직접입력 금액을 넣음. 직접입력 금액이 있으면 그 금액이 우선함", "항목이 미분류로 나오면 <b>항목 직접지정</b>에서 항목을 고름"],
@@ -450,11 +541,14 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
         how: [`'3 ${act} 매출 및 원장 외 실적' 표에서 항목을 고르고 금액을 넣음${sales ? `. 연습 금액: ${sales}` : ""}`, "4대보험, 퇴직충당금처럼 원장에 없는 비용도 여기에 넣음. 차감 항목은 음수로 넣음", "<b>매출 및 원장 외 실적 저장</b>을 누름"],
         check: "매출 항목 금액이 1줄 이상 저장됨", done: () => { const a = S.A[m.act]; return !!(a && (a.lines || []).some(x => groupOf(x.item) === "매출" && num(x.amt))); }, targets: ["#jAdd", "#jSave"] },
       { view: "report", title: "실적표 확인하기", goal: "입력한 예산과 실적이 기존 실적표 양식에 들어간 것을 봄",
-        how: ["연도를 고르고 <b>실적, 계획(예산), 차이, 전년 실적, 달성률</b> 버튼으로 표시 기준을 바꿈", `${act} 열에 방금 올린 실적이 들어왔는지 확인함`, "<b>엑셀 내보내기</b>로 같은 구성의 엑셀 파일을 받음", "항목명을 누르면 분석 화면에서 그 항목의 세부 내역을 볼 수 있음"],
+        how: ["연도를 고르고 <b>실적, 계획(예산), 차이, 전년 실적, 달성률</b> 버튼으로 표시 기준을 바꿈", `${act} 열에 방금 올린 실적이 들어왔는지 확인함`, "<b>엑셀 내보내기</b>로 같은 구성의 엑셀 파일을 받음", `연도를 ${cy - 1}년으로 바꾸면 작년 실적과 계획도 볼 수 있음`, "항목명을 누르면 분석 화면에서 그 항목의 세부 내역을 볼 수 있음"],
         check: "표시 기준 버튼을 한 번 눌러 봄", done: () => !!T.flags.report, targets: ["#view-report .seg", "#rXls"] },
       { view: "analysis", title: "분석과 차이 사유", goal: "예산 대비, 전월 대비, 전년 대비 차이를 보고 사유를 남김",
-        how: ["<b>월, 분기, 연간 누계</b>를 바꿔 가며 비교 기준을 봄", "점검란에 예산초과, 목표미달이 뜬 항목을 찾음", "항목명을 누르면 아래에 예산 근거와 원장 내역이 나옴", "월 분석에서 차이사유 칸에 사유를 쓰고 칸을 벗어나면 저장됨"],
-        check: "차이사유를 1건 이상 저장함", done: () => Object.values(S.R).some(r => r && r.items && Object.keys(r.items).length > 0), targets: ["#view-analysis .seg", "#view-analysis [data-rs]"] },
+        how: ["<b>월, 분기, 연간 누계</b>를 바꿔 가며 비교 기준을 봄", `점검란에 예산초과, 목표미달이 뜬 항목을 찾음. 예: ${act} 광고선전비`, "항목명을 누르면 아래에 예산 근거와 원장 내역이 나옴", "월 분석에서 차이사유 칸에 사유를 쓰고 칸을 벗어나면 저장됨. 예시로 넣어 둔 사유는 올해 6월, 7월, 9월에서 볼 수 있음"],
+        check: "차이사유를 1건 이상 직접 저장함", done: () => Object.values(S.R).some(r => r && r.items && Object.values(r.items).some(x => x && x.by === "trainee")), targets: ["#view-analysis .seg", "#view-analysis [data-rs]"] },
+      { view: "analysis", title: "2년치 비교하기", goal: `${cy - 1}년과 ${cy}년 자료를 견주어 흐름을 읽음`,
+        how: ["<b>연간 누계</b>를 누름. 1월부터 고른 달까지의 누계를 전년 같은 기간, 연간 예산과 비교함", `연도를 ${cy - 1}년, 기간을 12월까지로 바꾸면 작년 한 해의 예산 대비 실적이 나옴`, `연도를 ${cy}년으로 되돌려 전년 동기간 대비 증감과 예산 소진율을 봄`, "<b>분기</b>를 누르면 전분기, 전년 같은 분기와 비교함. 실적표의 <b>전년 실적</b> 버튼으로도 작년 숫자를 볼 수 있음"],
+        check: "연간 누계를 누르고 연도를 한 번 바꿔 봄", done: () => !!(T.flags.yoyY && T.flags.yoyYear), targets: ['#view-analysis [data-t="Y"]', "#anY", "#anK"] },
       { view: "ai", title: "AI 분석 써 보기", goal: "Claude가 자료를 읽고 쓴 분석 보고를 받아 봄",
         how: ["기간을 고르고 <b>AI 분석 실행</b>을 누름. 보통 20초에서 1분 걸림", "<b>분석 저장(공유)</b>을 누르면 다른 사람도 그 분석을 볼 수 있음", "아래 'AI에게 질문'에서 이어서 물어볼 수 있음", "AI를 쓸 수 없다고 나오면 이 단계는 읽기만 하고 넘어감"],
         check: "AI 분석 화면을 열어 봄", done: () => !!T.seen.ai, targets: ["#aiRun"] },
@@ -463,7 +557,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
         check: "기준정보 화면을 열어 봄", done: () => !!T.seen.rules, targets: ["#rEdit"] },
       { view: "dashboard", title: "마무리", goal: "연습한 내용이 대시보드에 반영된 것을 확인함",
         how: [`대시보드에서 ${act} 실적이 그림과 숫자에 반영됐는지 봄`, "다시 연습하려면 위쪽 띠의 <b>처음 상태로 되돌리기</b>를 누름", `실제 입력은 실제 시스템에서 함: <a href="${REAL_URL}" target="_blank" rel="noopener">${REAL_URL}</a>`],
-        check: "앞의 11단계를 모두 마침", done: () => false, last: true, targets: [] },
+        check: "앞 단계를 모두 마침", done: () => false, last: true, targets: [] },
     ];
   }
   function status() { const ss = steps(); const st = ss.map(s => { if (s.last) return false; try { return !!s.done(); } catch (e) { return false; } }); st[ss.length - 1] = st.slice(0, -1).every(Boolean); return { ss, st }; }
@@ -672,10 +766,10 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
 
   // 완료 기준에 쓰는 표시
   const flag = k => { if (T.flags[k]) return; T.flags[k] = true; save(); paintTut(); paintHl(); };
-  document.addEventListener("change", e => { const t = e.target; if (!t || !t.id) return; if (t.id === "unit" || t.id === "dY" || t.id === "dM") flag("tour"); }, true);
+  document.addEventListener("change", e => { const t = e.target; if (!t || !t.id) return; if (t.id === "unit" || t.id === "dY" || t.id === "dM") flag("tour"); if (t.id === "anY") flag("yoyYear"); }, true);
   const budTouch = e => { if (e.target.closest && e.target.closest("#bBody") && T.ym && U.bym === pm().bud) flag("budEdit"); };
   document.addEventListener("input", budTouch, true); document.addEventListener("change", budTouch, true);
-  document.addEventListener("click", e => { if (e.target.closest && e.target.closest("#view-report [data-m]")) flag("report"); }, true);
+  document.addEventListener("click", e => { if (!e.target.closest) return; if (e.target.closest("#view-report [data-m]")) flag("report"); if (e.target.closest('#view-analysis [data-t="Y"]')) flag("yoyY"); }, true);
   window.addEventListener("resize", fitBody);
 
   // 위쪽 띠 버튼
