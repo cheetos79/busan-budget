@@ -236,6 +236,9 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
 .tut .chk.ok { background: var(--done-bg); color: var(--done); border-color: var(--done); font-weight: 700; }
 .tut .away { padding: 8px 10px; background: var(--guide-bg); border: 1px solid var(--guide-line); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .tut-nav .sp { flex: 1; }
+.tut .ask { display: grid; gap: 8px; padding: 10px 12px; background: var(--err); color: var(--err-fg); border: 1px solid var(--err-fg); }
+.tut-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.tut-foot .note { flex: 1 1 180px; min-width: 0; }
 .tut-list { display: grid; gap: 1px; border-top: 1px solid var(--line); padding-top: 10px; }
 .tut-list button { display: flex; gap: 8px; align-items: baseline; text-align: left; border: 0; background: transparent; color: var(--fg); padding: 5px 6px; font: inherit; font-size: 12.5px; }
 .tut-list button:hover { background: var(--surface2); }
@@ -280,7 +283,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     <span class="grow">여기서 입력한 내용은 이 브라우저에만 남고 실제 시스템에는 반영되지 않음. 금액은 모두 예시임. <span id="tNote"></span></span>
     <button class="btn sm" id="tOpen">튜토리얼 접기</button>
     <button class="btn sm" id="tHelp">버튼 설명 보기</button>
-    <button class="btn sm" id="tReset">처음 상태로 되돌리기</button>
+    <button class="btn sm" id="tReset">리셋 하기</button>
   </div>
   <div class="panel helplist" id="helpList" hidden></div>
   <div id="demoBar" class="banner info" hidden></div>
@@ -556,7 +559,8 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
         how: ["계정 기본 매핑, 적요 문구 규칙, 표준 적요, 점검 기준을 봄", "분류는 항목 직접지정, 적요 문구 규칙, 계정 기본 매핑 순서로 정해짐", "<b>수정</b>을 누르면 고칠 수 있음. 실제 시스템에서는 관리자만 고침"],
         check: "기준정보 화면을 열어 봄", done: () => !!T.seen.rules, targets: ["#rEdit"] },
       { view: "dashboard", title: "마무리", goal: "연습한 내용이 대시보드에 반영된 것을 확인함",
-        how: [`대시보드에서 ${act} 실적이 그림과 숫자에 반영됐는지 봄`, "다시 연습하려면 위쪽 띠의 <b>처음 상태로 되돌리기</b>를 누름", `실제 입력은 실제 시스템에서 함: <a href="${REAL_URL}" target="_blank" rel="noopener">${REAL_URL}</a>`],
+        acts: [{ label: "다음 사람을 위해 리셋 하기", run: () => askReset(), pri: true, help: "연습 내용과 튜토리얼 진행 상황을 모두 지우고 처음 상태로 되돌림. 누르면 확인을 한 번 더 물음" }],
+        how: [`대시보드에서 ${act} 실적이 그림과 숫자에 반영됐는지 봄`, "다음 사람이 연습하거나 처음부터 다시 하려면 <b>리셋 하기</b>를 누름. 연습 내용과 진행 상황이 모두 지워지고 1단계부터 다시 시작함", `실제 입력은 실제 시스템에서 함: <a href="${REAL_URL}" target="_blank" rel="noopener">${REAL_URL}</a>`],
         check: "앞 단계를 모두 마침", done: () => false, last: true, targets: [] },
     ];
   }
@@ -572,11 +576,13 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     const tb = byId("tOpen"); if (tb) tb.textContent = T.open ? "튜토리얼 접기" : "튜토리얼 펼치기";
     if (!T.open) { el.innerHTML = `<button class="tut-pill" id="tutMax">튜토리얼 펼치기 (${doneN}/${n} 완료)</button>`; byId("tutMax").onclick = () => { T.open = true; save(); paintTut(); paintHl(); }; applyHelp(); fitBody(); return; }
     const away = U.view !== s.view || (s.month && !s.month());
-    const acts = (s.acts || []).map((a, i) => (a.show && !a.show() ? "" : `<button class="btn" data-tact="${i}">${esc(a.label)}</button>`)).join("");
+    const acts = (s.acts || []).map((a, i) => (a.show && !a.show() ? "" : `<button class="btn ${a.pri ? "pri" : ""}" data-tact="${i}">${esc(a.label)}</button>`)).join("");
+    const ask = T.ask ? `<div class="ask" role="alertdialog" aria-label="리셋 확인"><b>리셋 확인</b><span>리셋하면 연습하면서 넣은 내용과 튜토리얼 진행 상황이 모두 지워짐. 예시 자료는 처음 상태로 돌아가고 1단계부터 다시 시작함</span><div class="acts"><button class="btn pri" id="tutResetYes">리셋 실행</button><button class="btn" id="tutResetNo">취소</button></div></div>` : "";
     el.innerHTML = `
       <div class="tut-h"><b>튜토리얼</b><span class="cnt">${doneN} / ${n} 완료</span><button id="tutMin">접기</button></div>
       <div class="tut-bar"><i style="width:${Math.round(doneN / n * 100)}%"></i></div>
       <div class="tut-b">
+        ${ask}
         <div class="tut-t"><span>${T.i + 1}단계 ${esc(s.title)}</span><span class="chip ${ok ? "f-ok" : "f-info"}">${ok ? "완료" : "진행 중"}</span></div>
         <div class="goal">${esc(s.goal)}</div>
         ${away ? `<div class="away"><span>이 단계는 다른 화면에서 함</span><button class="btn sm pri" id="tutGo">이 단계 화면으로 이동</button></div>` : ""}
@@ -584,12 +590,15 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
         ${acts ? `<div class="acts">${acts}</div>` : ""}
         <div class="chk ${ok ? "ok" : ""}">${ok ? "이 단계를 마쳤음" : "완료 기준: " + esc(s.check)}</div>
         <div class="tut-nav"><button class="btn" id="tutPrev" ${T.i === 0 ? "disabled" : ""}>이전 단계</button><span class="sp"></span><button class="btn ${ok ? "pri" : ""}" id="tutNext" ${T.i === n - 1 ? "disabled" : ""}>다음 단계</button></div>
+        <div class="tut-foot"><button class="btn sm" id="tutReset">리셋 하기</button><span class="note">여러 사람이 차례로 연습할 때 누름. 연습 내용과 진행 상황을 지우고 1단계로 돌아감</span></div>
         <div class="tut-list">${ss.map((x, i) => `<button data-ts="${i}" ${i === T.i ? 'aria-current="step"' : ""}><span>${i + 1}</span><span>${esc(x.title)}</span><span class="st ${st[i] ? "ok" : ""}">${st[i] ? "완료" : ""}</span></button>`).join("")}</div>
       </div>`;
     byId("tutMin").onclick = () => { T.open = false; save(); paintTut(); paintHl(); };
     byId("tutPrev").onclick = () => goStep(T.i - 1, true);
     byId("tutNext").onclick = () => goStep(T.i + 1, true);
     if (byId("tutGo")) byId("tutGo").onclick = () => goView(s);
+    byId("tutReset").onclick = () => askReset();
+    if (byId("tutResetYes")) { byId("tutResetYes").onclick = () => doReset(); byId("tutResetNo").onclick = () => { T.ask = false; paintTut(); paintHl(); }; }
     el.querySelectorAll("[data-tact]").forEach(b => { const a = s.acts[Number(b.dataset.tact)]; b.onclick = () => a.run(); b.dataset.help = a.help; b.dataset.helpName = a.label; });
     el.querySelectorAll("[data-ts]").forEach(b => (b.onclick = () => goStep(Number(b.dataset.ts), true)));
     applyHelp(); fitBody();
@@ -612,7 +621,10 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     ["#unit", "금액 단위", "화면에 보이는 금액 단위를 원, 천원, 백만원 중에서 고름. 입력하는 금액은 항상 원 단위임"],
     ["#tOpen", "", "튜토리얼 판을 접거나 다시 펼침"],
     ["#tHelp", "", "지금 화면에 있는 버튼과 입력 칸의 설명을 표로 보여 주거나 숨김"],
-    ["#tReset", "처음 상태로 되돌리기", "연습하면서 넣은 내용을 모두 지우고 처음 예시 자료로 되돌림. 두 번 눌러야 실행됨"],
+    ["#tReset", "리셋 하기", "연습 내용과 튜토리얼 진행 상황을 모두 지우고 처음 상태로 되돌림. 여러 사람이 차례로 연습할 때 씀. 누르면 확인을 한 번 더 물음"],
+    ["#tutReset", "리셋 하기", "연습 내용과 튜토리얼 진행 상황을 모두 지우고 처음 상태로 되돌림. 여러 사람이 차례로 연습할 때 씀. 누르면 확인을 한 번 더 물음"],
+    ["#tutResetYes", "리셋 실행", "지금 리셋함. 지운 연습 내용은 되살릴 수 없음"],
+    ["#tutResetNo", "취소", "리셋하지 않고 지금 상태를 그대로 둠"],
     ["#tutMin", "접기", "튜토리얼 판을 작게 접음. 진행 상황은 그대로 남음"],
     ["#tutMax", "튜토리얼 펼치기", "접어 둔 튜토리얼 판을 다시 펼침"],
     ["#tutPrev", "이전 단계", "앞 단계로 돌아가고 그 단계의 화면을 엶"],
@@ -775,17 +787,18 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
   // 위쪽 띠 버튼
   byId("tOpen").onclick = () => { T.open = !T.open; save(); paintTut(); paintHl(); };
   byId("tHelp").onclick = () => { T.list = !T.list; save(); paintHelpList(); if (T.list) byId("helpList").scrollIntoView({ block: "start", behavior: "smooth" }); };
-  let armed = 0;
-  byId("tReset").onclick = e => {
-    const b = e.currentTarget;
-    if (Date.now() - armed > 5000) { armed = Date.now(); b.textContent = "한 번 더 누르면 되돌림"; setTimeout(() => { if (Date.now() - armed >= 5000) b.textContent = "처음 상태로 되돌리기"; }, 5100); return; }
-    armed = 0; b.textContent = "처음 상태로 되돌리기";
-    T.demo = null; T.ym = curYm(); T.store = seed(); T.i = 0; T.flags = {}; T.seen = {}; T.note = "연습 자료를 처음 상태로 되돌렸음";
-    resetDrafts(); U.bym = null; U.aym = null; U.ry = null; U.dash = null; U.an = { t: "M", y: null, k: null, sel: null }; U.bfilter = "전체"; U.lfilter = "전체";
+  // 리셋: 여러 사람이 차례로 연습할 수 있게 연습 내용, 튜토리얼 진행, 화면 설정을 모두 처음 상태로 되돌림
+  function askReset() { T.ask = true; T.open = true; paintTut(); paintHl(); const b = byId("tut").querySelector(".tut-b"); if (b) b.scrollTop = 0; const no = byId("tutResetNo"); if (no) no.focus(); }
+  function doReset() {
+    T.ask = false; T.demo = null; T.ym = curYm(); T.store = seed(); T.i = 0; T.flags = {}; T.seen = {}; T.open = true; T.list = false; T.note = "리셋했음. 1단계부터 다시 시작함";
+    resetDrafts(); U.bym = null; U.aym = null; U.ry = null; U.rmode = "A"; U.dash = null; U.an = { t: "M", y: null, k: null, sel: null }; U.bfilter = "전체"; U.lfilter = "전체";
+    if (!U.ai.busy && !U.ai.chatBusy) U.ai = { t: "M", y: null, k: null, out: "", busy: false, ctl: null, chat: [], chatBusy: false, viewKey: null };
+    UNIT = 1000000; try { localStorage.setItem("bdb-unit", "1000000"); } catch (e) {} const u = byId("unit"); if (u) u.value = "1000000";
     subs.forEach(s => s.next(s.kind === "doc" ? snapDoc(s.path) : colSnap(s.path)));
     save(); if (U.view !== "dashboard") location.hash = "#dashboard"; else render();
-    window.scrollTo(0, 0);
-  };
+    window.scrollTo(0, 0); toast("리셋했음. 1단계부터 다시 시작함");
+  }
+  byId("tReset").onclick = () => askReset();
   window.BDB_TRAIN = { T, HELP, steps, status, ledgerText, pm };
 })();
 </script>
