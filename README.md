@@ -8,7 +8,7 @@
 나. 공유 저장: Firebase Firestore. 등록된 구성원만 읽고 씀(firestore.rules)
 다. 로그인: Firebase Authentication(Google 계정 또는 이메일/비밀번호, 이메일 인증 필수)
 라. AI 분석: Claude API를 각 사용자 브라우저에서 직접 호출함. API 키는 그 브라우저에만 저장됨
-마. 공개 저장소에는 자료와 내부 기준정보(계정 매핑, 적요 규칙)를 넣지 않음. 기준정보는 관리자가 로그인 후 JSON 파일로 한 번 올림
+마. 실제 시스템(index.html)에는 자료와 내부 기준정보(계정 매핑, 적요 규칙)를 넣지 않음. 기준정보는 관리자가 로그인 후 JSON 파일로 한 번 올림. 연습판(training 폴더)에만 연습용으로 기준정보가 들어 있음
 
 2 Firebase 설정 (관리자, 처음 한 번)
 
@@ -40,3 +40,10 @@
 가. claude.ai 판과 저장소가 달라 두 판의 자료는 서로 이어지지 않음. 한쪽을 주 시스템으로 정해 씀
 나. firebase-config.js 값은 웹 앱을 가리키는 공개 식별자라 저장소에 있어도 됨. 자료 접근은 규칙과 구성원 등록으로 막음
 다. 저장소 파일: index.html(앱), pages-adapter.js(Firebase, Claude API 연결), firebase-config.js(설정값), firestore.rules(보안 규칙)
+
+6 연습판
+
+가. 주소: 사이트 주소 뒤에 training/ 을 붙임(예: https://계정명.github.io/busan-budget/training/)
+나. 로그인 없이 열리고, 입력한 내용은 그 브라우저에만 남음. 실제 자료(Firebase)와 이어지지 않음
+다. 예시 자료, 12단계 튜토리얼, 버튼별 사용 설명이 들어 있음. AI 분석은 연습판에서 실행되지 않음
+라. 연습판에는 분류 연습을 위해 기준정보(계정 매핑, 적요 규칙)가 들어 있음
