@@ -532,6 +532,20 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
   function onView(view, fn) { const s = steps().find(x => x.view === view); if (U.view === view && (!s || !s.month || s.month())) { fn(); return; } if (s && s.pre) s.pre(); if (U.view !== view) location.hash = "#" + view; else render(); setTimeout(fn, 120); }
   function fillLedger() { onView("actual", () => { const box = byId("pasteBox"); if (!box) return; box.value = ledgerText(); box.focus(); box.scrollIntoView({ block: "center" }); toast("연습용 원장을 붙여넣기 칸에 넣음. '붙여넣은 내용 읽기'를 누름"); }); }
   function downloadLedger() { if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; } const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ledgerRows()), "계정별원장"); saveXlsx(wb, "연습용_계정별원장_" + pm().act); }
+  // 연습용 월 예산 제출 양식(엑셀): 실제 양식과 같은 시트 이름과 열 이름으로 만들어 '엑셀 양식 올리기'를 연습함
+  const FORM_SHEETS = [["1 매출", ["단과", "종합", "모의고사", "모의고사 매출대체", "카페포인트", "이러닝AFP", "홈페이지용역수수료"]], ["2 인건비", ["강사급여", "출장강사", "특강료", "성과급", "직원급여", "4대보험", "퇴직충당금"]], ["3 임차료·시설", ["임대료(학원)", "관리비", "관리비(수도광열비등)", "감가상각비", "시설설치비", "차량유지비"]], ["4 운영비", null]];
+  function downloadBudgetForm() {
+    if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
+    const m = pm(), src = (demo().B[m.bud] || { lines: [] }).lines, wb = XLSX.utils.book_new(), used = new Set();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["부산대성기숙학원 추정손익(월 예산 총괄) 연습용"], ["대상 연도", Number(m.bud.slice(0, 4)), "대상 월", Number(m.bud.slice(5, 7)), "제출 기한", dueOf(m.bud)], [], ["연습용 파일이라 추정손익 표는 비어 있음. 실제 양식에서는 입력 시트의 금액이 이 시트에 자동으로 모임"]]), "추정손익");
+    FORM_SHEETS.forEach(([name, items]) => {
+      const rows = [[name + " 예산(연습용)"], ["금액은 모두 가짜임"], [], ["번호", "실적표 항목", "더존 계정", "적요(내용)", "수량", "단가", "직접입력 금액", "예산금액(자동)", "산출근거", "비고"]];
+      let n = 0;
+      src.forEach((l, i) => { const it = classify(S.cfg, l.acct, l.memo, l.ovr).item; if (used.has(i) || (items && !items.includes(it))) return; used.add(i); rows.push([++n, it, l.acct, l.memo, hasVal(l.qty) ? num(l.qty) : "", hasVal(l.price) ? num(l.price) : "", hasVal(l.direct) ? num(l.direct) : "", budgetAmt(l), l.basis || "", ""]); });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), name);
+    });
+    saveXlsx(wb, "연습용_월예산제출양식_" + m.bud);
+  }
   function fillBudget() { onView("budget", () => { const m = pm(); if (!U.bd || U.bd.ym !== m.bud) return; U.bd.lines = copy((demo().B[m.bud] || { lines: [] }).lines).map(l => Object.assign(l, { id: uidStr() })); U.bd.dirty = true; render(); toast("연습용 예산을 채움. 내용을 확인하고 저장함"); }); }
   function fillAdj() { onView("actual", () => { const m = pm(); if (!U.adj || U.adj.ym !== m.act) return; U.adj.lines = copy((demo().A[m.act] || { lines: [] }).lines).map(l => Object.assign(l, { src: "연습용 금액" })); U.adj.dirty = true; render(); const b = byId("jSave"); if (b) b.scrollIntoView({ block: "center" }); toast("연습용 매출과 원장 외 실적을 채움. 저장 버튼을 누름"); }); }
 
@@ -549,8 +563,8 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
         how: ["실제 업무 순서: 전월 15일까지 예산 작성과 제출, 원장 승인, 디지털대성 상무 승인, 운영 통장 입금, 다음 달 결산 뒤 실적 입력과 분석", "위쪽 탭 7개로 화면을 오감. 대시보드, 예산 입력, 실적 입력, 실적표, 분석, AI 분석, 기준정보 순서임", "오른쪽 위 <b>금액 단위</b>에서 원, 천원, 백만원 표시를 바꿈", "버튼에 마우스를 올리면 사용 설명이 뜸. 위쪽 띠의 <b>버튼 설명 보기</b>를 누르면 지금 화면의 버튼 설명을 표로 볼 수 있음", `연습판에는 ${cy - 1}년 1월부터 ${ymText(ymAdd(m.act, -1))}까지의 예시 실적과 2년치 예시 예산이 들어 있음. 연매출 약 50억 원, 영업이익 약 5억 원 규모로 만든 가짜 금액임`],
         check: "금액 단위나 대시보드의 연도, 월을 한 번 바꿔 봄", done: () => !!T.flags.tour, targets: ["#unit", "#dY", "#dM"] },
       { view: "budget", title: "예산 줄 채우기", goal: `${bud} 예산 표에 줄을 채움. 예산은 대상 월의 전월 15일까지 제출함`, pre: budPre, month: budMonth,
-        acts: [{ label: "연습용 예산 채우기", run: fillBudget, help: "연간 계획(매출 약 50억 원, 영업이익 약 5억 원)에 맞춘 이 달 예산을 표에 한 번에 채움. 저장은 직접 누름" }],
-        how: [`대상 연월이 ${bud}인지 확인함`, "<b>기본 목록 불러오기</b>를 누르면 표준 적요가 계정과 함께 들어감. 금액은 빈칸임", "<b>전월 예산 복사</b>를 누르면 전월과 같은 계정, 적요 줄에 전월 금액이 채워짐", "<b>연습용 예산 채우기</b>를 누르면 연간 계획에 맞춘 금액이 한 번에 들어감. 시연할 때나 연간 예산을 계획대로 맞춰 보고 싶을 때 씀"],
+        acts: [{ label: "연습용 예산 채우기", run: fillBudget, help: "연간 계획(매출 약 50억 원, 영업이익 약 5억 원)에 맞춘 이 달 예산을 표에 한 번에 채움. 저장은 직접 누름" }, { label: "연습용 엑셀 양식 받기", run: downloadBudgetForm, help: "금액이 채워진 연습용 월 예산 제출 양식(엑셀)을 받음. '엑셀 양식 올리기'를 연습할 때 씀", show: () => canExport() }],
+        how: [`대상 연월이 ${bud}인지 확인함`, "<b>기본 목록 불러오기</b>를 누르면 표준 적요가 계정과 함께 들어감. 금액은 빈칸임", "<b>전월 예산 복사</b>를 누르면 전월과 같은 계정, 적요 줄에 전월 금액이 채워짐", "<b>연습용 예산 채우기</b>를 누르면 연간 계획에 맞춘 금액이 한 번에 들어감. 시연할 때나 연간 예산을 계획대로 맞춰 보고 싶을 때 씀", "엑셀로 받은 예산은 <b>엑셀 양식 올리기</b>로 넣음. 월 예산 제출 양식 파일을 고르면 읽은 결과가 나오고, '예산 표에 넣기'를 누르면 금액을 넣은 줄이 들어감. 연습 파일은 <b>연습용 엑셀 양식 받기</b>로 받음"],
         check: `${bud} 예산 표에 줄이 1개 이상 생김`, done: () => (U.bd && U.bd.ym === m.bud && U.bd.lines.length > 0) || !!S.B[m.bud], targets: ["#bStd", "#bCopy"] },
       { view: "budget", title: "계정, 적요, 금액 넣기", goal: "줄을 직접 넣고 자동 분류가 어떻게 되는지 봄", pre: budPre, month: budMonth,
         how: ["<b>줄 추가</b>를 누르고 더존 계정을 고름", "적요를 넣으면 구분(매출, 고정비, 변동비)과 실적표 항목이 자동으로 정해짐. 예: 계정 지급수수료에 적요 '카드결제 수수료'를 넣으면 카드수수료가 됨", "수량과 단가를 넣거나 직접입력 금액을 넣음. 직접입력 금액이 있으면 그 금액이 우선함", "항목이 미분류로 나오면 <b>항목 직접지정</b>에서 항목을 고름"],
@@ -681,6 +695,9 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     ["#bAdd", "줄 추가", "빈 줄을 하나 더함. 계정, 적요, 금액을 직접 넣음"],
     ["#bStd", "기본 목록 불러오기", "기준정보의 표준 적요를 계정과 함께 한 번에 넣음. 이미 있는 줄은 다시 넣지 않고 금액은 비워 둠"],
     ["#bCopy", "전월 예산 복사", "전월 예산에서 같은 계정, 적요 줄의 금액을 가져오고 없는 줄은 새로 더함. 이미 금액이 있는 줄은 건드리지 않음"],
+    ['label[for="bXlsIn"]', "엑셀 양식 올리기", "월 예산 제출 양식(엑셀)을 골라 읽음. 금액을 넣은 줄이 읽은 결과로 나오고, 확인하면 예산 표에 들어감"],
+    ["#bImpApply", "예산 표에 넣기", "엑셀에서 읽은 줄로 그 달 예산 표를 바꿈. 저장을 눌러야 반영됨"],
+    ["#bImpCancel", "취소", "엑셀에서 읽은 내용을 버림. 예산 표는 그대로임"],
     ["#bSort", "구분순 정렬", "매출, 고정비, 변동비, 이익조정 순서와 실적표 항목 순서로 줄을 정렬함"],
     ["#view-budget .seg [data-g]", "구분 필터", "고른 구분의 줄만 보여 줌. 저장된 내용은 바뀌지 않음"],
     ["#bXls", "엑셀 내보내기", "지금 화면의 예산을 엑셀 파일로 받음"],
@@ -1082,7 +1099,7 @@ const U = {
   dash: null, bym: null, aym: null, ry: null, rmode: "A",
   an: { t: "M", y: null, k: null, sel: null },
   ai: { t: "M", y: null, k: null, out: "", busy: false, ctl: null, chat: [], chatBusy: false, viewKey: null },
-  bd: null, bfilter: "전체", led: null, lfilter: "전체", adj: null, imp: null, rulesEdit: null,
+  bd: null, bfilter: "전체", led: null, lfilter: "전체", adj: null, imp: null, bimp: null, rulesEdit: null,
 };
 function D() { return S.demo ? DEMO : S; }
 function agg() { const v = S.ver * 2 + (S.demo ? 1 : 0); if (AGG && AGGV === v) return AGG; const d = D(); AGG = buildAgg(S.cfg, d.B, d.L, d.A); AGGV = v; return AGG; }
@@ -1132,7 +1149,7 @@ async function boot() {
   }, e => { clearTimeout(timer); setConn("off", "연결 끊김"); S.conn = "off"; render(); });
   render();
 }
-function resetDrafts() { U.bd = null; U.led = null; U.adj = null; U.imp = null; U.rulesEdit = null; }
+function resetDrafts() { U.bd = null; U.led = null; U.adj = null; U.imp = null; U.bimp = null; U.rulesEdit = null; }
 function tooBig(body) { try { return new Blob([JSON.stringify(body)]).size > 240 * 1024; } catch (e) { return false; } }
 const TOO_BIG = "한 달 자료가 저장 한도(약 240KB)를 넘어 저장할 수 없음. 줄 수를 줄이거나 경영기획실에 문의함";
 function syncDrafts() { /* 초안은 버리지 않음. 각 화면이 저장본 버전과 비교해 변경 없는 초안만 다시 불러옴 */ }
@@ -1344,6 +1361,7 @@ function renderBudget(el) {
     <button class="btn" id="bAdd" ${can ? "" : "disabled"}>줄 추가</button>
     <button class="btn" id="bStd" ${can ? "" : "disabled"}>기본 목록 불러오기</button>
     <button class="btn" id="bCopy" ${can ? "" : "disabled"}>전월 예산 복사</button>
+    <label class="btn ${writable() && window.XLSX ? "" : "muted"}" for="bXlsIn">엑셀 양식 올리기</label><input type="file" id="bXlsIn" accept=".xlsx,.xls" class="sr" ${writable() && window.XLSX ? "" : "disabled"}>
     <button class="btn" id="bSort" ${can ? "" : "disabled"}>구분순 정렬</button>
     <span class="seg" role="group" aria-label="구분 필터">${["전체", "매출", "고정비", "변동비", "이익조정", "미분류"].map(g => `<button data-g="${g}" aria-pressed="${U.bfilter === g}">${g}</button>`).join("")}</span>
     <span class="sp"></span>
@@ -1352,6 +1370,7 @@ function renderBudget(el) {
     <button class="btn pri" id="bSubmit" ${can ? "" : "disabled"}>저장 후 제출</button>
   </div>
   ${!writable() && !S.demo ? `<div class="note">${S.conn === "off" ? "공유 저장소에 연결되지 않아 읽기만 가능함" : "이 공유 링크는 읽기 전용임. 입력하려면 소유자에게 참여자 이상 권한을 요청함"}</div>` : ""}
+  ${U.bimp ? budgetImportPreview(U.bimp) : ""}
   ${bd.lines.length ? `<div class="tbl tall"><table class="grid"><thead><tr><th>#</th><th>더존 계정</th><th>적요</th><th>구분</th><th>실적표 항목</th><th class="num">수량</th><th class="num">단가</th><th class="num">직접입력 금액</th><th class="num">예산금액</th><th>산출근거</th><th>항목 직접지정</th><th></th></tr></thead>
   <tbody id="bBody">${shown.map(([l, i]) => bRow(l, i, can)).join("")}</tbody></table></div>` : `<div class="empty">${ymLabel(bd.ym)} 예산이 아직 없음. '기본 목록 불러오기'로 표준 적요 ${S.cfg.std.length}줄을 넣거나 '전월 예산 복사'로 시작함</div>`}
   <div class="note">색칠된 입력 칸만 수정함. 구분, 실적표 항목, 예산금액은 자동임. 예산금액 = 수량 x 단가, 직접입력 금액이 있으면 그 금액이 우선함. 매출 차감 항목은 음수로 입력함. 작성: ${doc ? `${who(doc.updatedBy)} ${when(doc.updatedAt)}` : "-"}</div>`;
@@ -1367,6 +1386,7 @@ function renderBudget(el) {
   $("#bSave").onclick = () => saveBudget(false);
   $("#bSubmit").onclick = () => saveBudget(true);
   bindFlow(el, bd, doc);
+  bindBudgetImport(el);
   if ($("#bReload")) $("#bReload").onclick = () => { loadBudgetDraft(bd.ym); render(); };
   if ($("#bForce")) $("#bForce").onclick = () => { bd.force = true; saveBudget(!!bd.submitIntent); };
   const tb = $("#bBody"); if (!tb) return;
@@ -1519,6 +1539,73 @@ function exportApproval(bd, doc) {
   const ws = XLSX.utils.aoa_to_sheet(rows); ws["!cols"] = [{ wch: 38 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 22 }];
   const ws2 = XLSX.utils.aoa_to_sheet(budgetRows(bd)); ws2["!cols"] = [{ wch: 9 }, { wch: 20 }, { wch: 34 }, { wch: 8 }, { wch: 20 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 14 }];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "승인요청서"); XLSX.utils.book_append_sheet(wb, ws2, "예산상세"); saveXlsx(wb, `부산대성_예산승인요청서_${k}`);
+}
+// ===== 월 예산 제출 양식(엑셀) 올리기 =====
+// 입력 시트(실적표 항목, 더존 계정, 적요, 수량, 단가, 직접입력 금액, 산출근거, 비고)를 읽어 예산 줄로 바꿈. 금액을 넣은 줄만 가져옴
+function parseBudgetBook(wb) {
+  const norm = v => String(v == null ? "" : v).replace(/\s/g, ""), has = v => v !== "" && v != null && String(v).trim() !== "";
+  const lines = [], sheets = []; let bad = 0, forced = 0, filled = 0, zero = 0;
+  const defAcct = it => { const s = S.cfg.std.find(([a, t]) => classify(S.cfg, a, t, "").item === it); if (s) return s[0]; const a = S.cfg.acct.find(x => x.i === it); return a ? a.a : "원장외 항목"; };
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: "" });
+    const hi = rows.findIndex(r => r.some(c => norm(c) === "실적표항목") && r.some(c => norm(c) === "더존계정"));
+    if (hi < 0) continue;
+    const h = rows[hi].map(norm), col = k => h.findIndex(x => x.startsWith(k));
+    const c = { item: col("실적표항목"), acct: col("더존계정"), memo: col("적요"), qty: col("수량"), price: col("단가"), direct: col("직접입력"), basis: col("산출근거"), note: col("비고") };
+    sheets.push(name);
+    for (const r of rows.slice(hi + 1)) {
+      if (norm(r[0]) === "예시") continue;
+      const g = i => (i >= 0 && r[i] != null ? r[i] : ""), q = g(c.qty), p = g(c.price), d = g(c.direct);
+      if (!has(q) && !has(p) && !has(d)) continue;
+      if ([q, p, d].some(v => has(v) && !isFinite(parseNum(v)))) { bad++; continue; }
+      const it = String(g(c.item)).trim(), memo = String(g(c.memo)).trim(); let acct = String(g(c.acct)).trim(), ovr = "";
+      const valid = LEAVES.includes(it);
+      if (!acct && valid) { acct = defAcct(it); filled++; }
+      if (valid && classify(S.cfg, acct, memo, "").item !== it) { ovr = it; forced++; }
+      const line = { id: uidStr(), acct, memo, qty: has(q) ? String(parseNum(q)) : "", price: has(p) ? String(parseNum(p)) : "", direct: has(d) ? String(parseNum(d)) : "", basis: [g(c.basis), g(c.note)].map(x => String(x).trim()).filter(Boolean).join(" / "), ovr };
+      if (!budgetAmt(line)) { zero++; continue; }
+      lines.push(line);
+    }
+  }
+  if (!sheets.length) return { ok: false, msg: "월 예산 제출 양식이 아님. '실적표 항목'과 '더존 계정' 열이 있는 입력 시트를 찾지 못함" };
+  // 대상 연월과 엑셀이 계산해 둔 추정손익 값(있으면 대조에 씀)
+  const s0 = wb.Sheets["추정손익"]; let ymk = "", xl = null;
+  if (s0) {
+    const y = Number(s0.B2 && s0.B2.v), m = Number(s0.D2 && s0.D2.v); if (y >= 2000 && y < 2100 && m >= 1 && m <= 12) ymk = ym(y, m);
+    const rs = XLSX.utils.sheet_to_json(s0, { header: 1, raw: true, defval: "" }), pick = k => { const r = rs.find(x => norm(x[0]) === k); return r && typeof r[2] === "number" ? r[2] : null; };
+    const rev = pick("매출액"), sga = pick("판매비와일반관리비"); if (rev != null && sga != null && (rev || sga)) xl = { rev, sga };
+  }
+  return { ok: true, ym: ymk, lines, sheets, bad, forced, filled, zero, xl };
+}
+function budgetImportPreview(im) {
+  const k = im.ym || U.bym, sm = budgetSummary(im.lines), fc = fundCalc(S.cfg, im.lines), doc = D().B[k];
+  const locked = BST.indexOf(bState(doc)) >= 2, outOf = !YMS.includes(k);
+  const cmp = im.xl ? (Math.abs(sm.매출 - im.xl.rev) < 1 && Math.abs(fc.spend - im.xl.sga) < 1 ? "엑셀 추정손익과 일치함" : `엑셀 추정손익과 다름(매출 차이 ${wonTxt(sm.매출 - im.xl.rev)}원, 지출 차이 ${wonTxt(fc.spend - im.xl.sga)}원). 엑셀에서 항목을 고르지 않은 줄이 있는지 확인함`) : "엑셀에 계산된 추정손익 값이 없어 대조하지 않음";
+  const notes = [im.forced ? `항목을 직접 지정한 줄 ${im.forced}개` : "", im.filled ? `계정이 비어 기본 계정을 넣은 줄 ${im.filled}개` : "", im.bad ? `숫자로 읽지 못해 뺀 줄 ${im.bad}개` : "", im.zero ? `금액이 0이라 뺀 줄 ${im.zero}개` : "", sm.unc ? `미분류 ${sm.unc}줄(올린 뒤 항목 직접지정 필요)` : ""].filter(Boolean);
+  const why = outOf ? "대상 연월이 이 화면에서 고를 수 있는 범위 밖임" : locked ? "이미 제출한 예산이라 바꿀 수 없음. 회수한 뒤 다시 올림" : !im.lines.length ? "금액을 넣은 줄이 없음" : "";
+  return `<div class="banner info" style="flex-direction:column;align-items:stretch" id="bImp">
+    <div><b>엑셀에서 읽은 결과${im.fname ? ` (${esc(im.fname)})` : ""}</b>: 대상 ${esc(ymLabel(k))}${im.ym ? "" : "(파일에서 연월을 읽지 못해 지금 화면의 연월을 씀)"} | 금액 있는 줄 ${im.lines.length}개, 입력 시트 ${im.sheets.length}개</div>
+    <div>매출 <b>${wonTxt(sm.매출)}원</b>, 지출 <b>${wonTxt(fc.spend)}원</b>, 예상 영업이익 <b>${wonTxt(sm.op)}원</b>, 운영 통장 입금 요청액 <b>${wonTxt(fc.req)}원</b> | ${esc(cmp)}</div>
+    ${notes.length ? `<div class="note">${esc(notes.join(", "))}</div>` : ""}
+    ${why ? `<div class="note neg">${esc(why)}</div>` : ""}
+    <div class="toolbar"><button class="btn pri" id="bImpApply" ${why || !writable() ? "disabled" : ""}>${esc(ymLabel(k))} 예산 표에 넣기(지금 표 내용 대체)</button><button class="btn" id="bImpCancel">취소</button><span class="note">넣은 뒤 내용을 확인하고 저장을 눌러야 반영됨</span></div></div>`;
+}
+function bindBudgetImport(el) {
+  const inp = el.querySelector("#bXlsIn");
+  if (inp) inp.onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+    if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
+    try { const res = parseBudgetBook(XLSX.read(await f.arrayBuffer(), { type: "array" })); if (!res.ok) { toast(res.msg); return; } U.bimp = { ...res, fname: f.name }; render(); const b = document.getElementById("bImp"); if (b) b.scrollIntoView({ block: "center" }); }
+    catch (x) { toast("엑셀 파일을 읽지 못함. 월 예산 제출 양식(xlsx)인지 확인함"); }
+  };
+  const ap = el.querySelector("#bImpApply"), cc = el.querySelector("#bImpCancel");
+  if (cc) cc.onclick = () => { U.bimp = null; render(); };
+  if (ap) ap.onclick = () => {
+    const im = U.bimp; if (!im || !writable()) return; const k = im.ym || U.bym;
+    if (BST.indexOf(bState(D().B[k])) >= 2) { toast("이미 제출한 예산이라 바꿀 수 없음. 회수한 뒤 다시 올림"); return; }
+    U.bym = k; loadBudgetDraft(k); U.bd.lines = clone(im.lines); U.bd.dirty = true; U.bfilter = "전체"; U.bimp = null; render();
+    toast(`${ymLabel(k)} 예산 표에 ${im.lines.length}줄을 넣음. 확인한 뒤 저장함`);
+  };
 }
 async function saveBudget(submit) {
   if (!writable() || !U.bd) return; const bd = U.bd; const ref = db.doc("budget/" + bd.ym);
