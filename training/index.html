@@ -198,6 +198,24 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
 .sr { position: absolute; left: -9999px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
+/* 승인 진행 판: 5단계 진행 표시, 입금 요청액, 메일 문안 */
+.fsteps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 820px) { .fsteps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.fstep { display: grid; gap: 1px; align-content: start; padding: 8px 10px; border: 2px solid transparent; background: var(--surface2); color: var(--muted); font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
+.fstep b { color: var(--fg); font-size: 13.5px; }
+.fstep .fno { font-size: 11px; font-variant-numeric: tabular-nums; }
+.fstep.done { background: var(--ok); color: var(--ok-fg); }
+.fstep.done b { color: var(--ok-fg); }
+.fstep.cur { background: var(--surface); border-color: var(--navy2); color: var(--fg); }
+.fstep.cur .fsub { color: var(--navy2); font-weight: 700; }
+.fund { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 10px 12px; background: var(--sub); }
+.fund b { font-size: 18px; font-variant-numeric: tabular-nums; color: var(--navy); }
+.fund .note { flex: 1 1 320px; min-width: 0; }
+.fact { display: grid; gap: 8px; }
+.mail { display: grid; gap: 6px; }
+.mail textarea { width: 100%; font: inherit; font-size: 12.5px; line-height: 1.5; padding: 8px 10px; border: 1px solid var(--line); background: var(--surface2); color: var(--fg); resize: vertical; }
+.flog { font-size: 12px; color: var(--muted); }
+
 /* ===== 연습판 층: 위쪽 안내 띠, 튜토리얼(넓은 화면은 오른쪽 기둥, 좁은 화면은 아래쪽 판), 버튼 설명 ===== */
 :root { --guide: #7A4B00; --guide-bg: #FFF1CC; --guide-line: #E3B341; --hl: #D97706; --done: #1E6B34; --done-bg: #DCEFC9; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --guide: #F5D995; --guide-bg: #3B2F12; --guide-line: #8A6A1E; --hl: #FBBF24; --done: #CFE8B8; --done-bg: #24391B; } }
@@ -307,7 +325,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
    앱 본체 스크립트보다 먼저 실행됨. 앱의 전역(S, U, render, classify 등)은 함수가 불릴 때 참조함 */
 (function () {
   "use strict";
-  const LS = "bdb-train-v2";
+  const LS = "bdb-train-v3";
   const REAL_URL = "https://cheetos79.github.io/busan-budget/";
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const copy = o => JSON.parse(JSON.stringify(o));
@@ -419,7 +437,13 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     for (const yy of [cy - 1, cy]) for (let mi = 0; mi < 12; mi++) {
       const k = ym(yy, mi + 1), m = mi + 1, bl = budLines(yy, mi, 1);
       const day = yy === cy && m === 5 ? "-18" : "-1" + Math.floor(rnd() * 5);
-      B[k] = { ym: k, lines: bl, rev: 1, updatedBy: "seed", updatedAt: ymAdd(k, -1) + day + "T09:00:00.000Z", submittedAt: ymAdd(k, -1) + day, submittedBy: "seed" };
+      const pk = ymAdd(k, -1), late = day === "-18", iso = d => pk + d + "T09:00:00.000Z";
+      if (k <= T.ym) {
+        const d1 = late ? "-19" : "-16", d2 = late ? "-20" : "-17", d3 = late ? "-22" : "-20", req = fundCalc(cfg, bl).req;
+        B[k] = { ym: k, lines: bl, rev: 1, updatedBy: "seed", updatedAt: iso(day), submittedAt: pk + day, submittedBy: "seed", lastSubmittedAt: pk + day, st: "fund",
+          flow: { a1: { at: iso(d1), by: "seed-a1", via: "direct", note: "" }, a2: { at: iso(d2), by: "seed-a2", via: "proxy", note: "메일 승인" }, fund: { at: iso(d3), by: "seed-fund", amt: req, date: pk + d3, note: "" }, reject: null },
+          log: [{ at: iso(day), by: "seed", act: "submit", note: "" }, { at: iso(d1), by: "seed-a1", act: "a1", note: "" }, { at: iso(d2), by: "seed", act: "a2", note: "메일 승인" }, { at: iso(d3), by: "seed-fund", act: "fund", note: "" }] };
+      } else B[k] = { ym: k, lines: bl, rev: 1, updatedBy: "seed", updatedAt: iso(day), submittedAt: null, submittedBy: null, lastSubmittedAt: null, st: "draft", flow: { a1: null, a2: null, fund: null, reject: null }, log: [] };
       if (k > act) continue;
       const led = [], adj = [];
       for (const it of LEAVES) {
@@ -475,9 +499,10 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
   const anchorDl = { save: async r => { const blob = r.data instanceof Blob ? r.data : new Blob([r.data]); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = r.filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 3000); return { status: "saved" }; } };
   const userShim = {
     id: async () => "trainee", canEdit: async () => true, isOwner: async () => true, can: async () => true,
-    profiles: async ids => Object.fromEntries([].concat(ids).map(i => [i, { id: i, name: i === "trainee" ? "연습 사용자" : "예시 담당자", avatarUrl: "", color: "#2E5597", email: null, isMe: i === "trainee", guest: false }])),
+    profiles: async ids => Object.fromEntries([].concat(ids).map(i => [i, { id: i, name: { trainee: "연습 사용자", seed: "예시 팀장", "seed-a1": "예시 원장", "seed-a2": "예시 상무", "seed-fund": "예시 자금 담당" }[i] || "예시 담당자", avatarUrl: "", color: "#2E5597", email: null, isMe: i === "trainee", guest: false }])),
   };
   const EXT = window.BDB_EXT = window.BDB_EXT || {};
+  EXT.siteUrl = REAL_URL;
   EXT.aiMissing = "이 연습판에서는 AI 분석을 실행할 수 없음. claude.ai에 게시된 연습판이나 실제 시스템에서 써 볼 수 있음";
   EXT.runtime = { use: async n => {
     if (n === "db") { ensureStore(); return localDb; }
@@ -518,9 +543,10 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     const budPre = () => { if (!(U.bd && U.bd.dirty)) { U.bym = m.bud; } };
     const actPre = () => { if (!((U.led && U.led.dirty) || (U.adj && U.adj.dirty))) { U.aym = m.act; } };
     const budMonth = () => U.bym === m.bud, actMonth = () => U.aym === m.act;
+    const stAt = k => BST.indexOf(bState(S.B[k]));
     return [
       { view: "dashboard", title: "화면 둘러보기", goal: "화면 구성과 연습판 쓰는 법을 익힘",
-        how: ["위쪽 탭 7개로 화면을 오감. 대시보드, 예산 입력, 실적 입력, 실적표, 분석, AI 분석, 기준정보 순서임", "오른쪽 위 <b>금액 단위</b>에서 원, 천원, 백만원 표시를 바꿈", "버튼에 마우스를 올리면 사용 설명이 뜸. 위쪽 띠의 <b>버튼 설명 보기</b>를 누르면 지금 화면의 버튼 설명을 표로 볼 수 있음", `연습판에는 ${cy - 1}년 1월부터 ${ymText(ymAdd(m.act, -1))}까지의 예시 실적과 2년치 예시 예산이 들어 있음. 연매출 약 50억 원, 영업이익 약 5억 원 규모로 만든 가짜 금액임`],
+        how: ["실제 업무 순서: 전월 15일까지 예산 작성과 제출, 원장 승인, 디지털대성 상무 승인, 운영 통장 입금, 다음 달 결산 뒤 실적 입력과 분석", "위쪽 탭 7개로 화면을 오감. 대시보드, 예산 입력, 실적 입력, 실적표, 분석, AI 분석, 기준정보 순서임", "오른쪽 위 <b>금액 단위</b>에서 원, 천원, 백만원 표시를 바꿈", "버튼에 마우스를 올리면 사용 설명이 뜸. 위쪽 띠의 <b>버튼 설명 보기</b>를 누르면 지금 화면의 버튼 설명을 표로 볼 수 있음", `연습판에는 ${cy - 1}년 1월부터 ${ymText(ymAdd(m.act, -1))}까지의 예시 실적과 2년치 예시 예산이 들어 있음. 연매출 약 50억 원, 영업이익 약 5억 원 규모로 만든 가짜 금액임`],
         check: "금액 단위나 대시보드의 연도, 월을 한 번 바꿔 봄", done: () => !!T.flags.tour, targets: ["#unit", "#dY", "#dM"] },
       { view: "budget", title: "예산 줄 채우기", goal: `${bud} 예산 표에 줄을 채움. 예산은 대상 월의 전월 15일까지 제출함`, pre: budPre, month: budMonth,
         acts: [{ label: "연습용 예산 채우기", run: fillBudget, help: "연간 계획(매출 약 50억 원, 영업이익 약 5억 원)에 맞춘 이 달 예산을 표에 한 번에 채움. 저장은 직접 누름" }],
@@ -530,8 +556,17 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
         how: ["<b>줄 추가</b>를 누르고 더존 계정을 고름", "적요를 넣으면 구분(매출, 고정비, 변동비)과 실적표 항목이 자동으로 정해짐. 예: 계정 지급수수료에 적요 '카드결제 수수료'를 넣으면 카드수수료가 됨", "수량과 단가를 넣거나 직접입력 금액을 넣음. 직접입력 금액이 있으면 그 금액이 우선함", "항목이 미분류로 나오면 <b>항목 직접지정</b>에서 항목을 고름"],
         check: "예산 표에서 값을 한 번 이상 고침", done: () => !!T.flags.budEdit || !!S.B[m.bud], targets: ["#bAdd"] },
       { view: "budget", title: "저장하고 제출하기", goal: `${bud} 예산을 저장하고 제출함`, pre: budPre, month: budMonth,
-        how: ["<b>저장</b>은 작성 중인 내용을 보관함. 여러 번 눌러도 됨", "<b>저장 후 제출</b>을 누르면 제출 일자가 기록됨. 미분류 줄이 있으면 저장만 되고 제출은 되지 않음", "제출한 뒤에도 고쳐서 다시 저장할 수 있음"],
-        check: `${bud} 예산이 제출됨`, done: () => !!(S.B[m.bud] && S.B[m.bud].submittedAt), targets: ["#bSave", "#bSubmit"] },
+        how: ["<b>저장</b>은 작성 중인 내용을 보관함. 여러 번 눌러도 됨", "<b>저장 후 제출</b>을 누르면 제출 일자가 기록되고 승인 단계로 넘어감. 미분류 줄이 있으면 저장만 되고 제출은 되지 않음", "제출한 예산은 고칠 수 없음. 고치려면 '승인 진행' 판의 <b>회수하여 수정</b>을 누름"],
+        check: `${bud} 예산이 제출됨`, done: () => stAt(m.bud) >= 2, targets: ["#bSave", "#bSubmit"] },
+      { view: "budget", title: "승인 요청서와 메일 문안", goal: "제출한 예산의 승인을 요청할 자료를 준비함", pre: budPre, month: budMonth,
+        how: ["제출하면 '승인 진행' 판이 1차 승인 단계로 바뀜. 5단계(작성, 제출, 1차 승인, 2차 승인, 운영 통장 입금) 가운데 지금 할 단계가 표시됨", "<b>승인 요청서 받기(엑셀)</b>를 누르면 예산 요약, 입금 요청액, 항목별 예산이 한 장에 들어간 파일을 받음", "<b>문안 복사</b>를 눌러 메일 본문을 복사하고, 승인 요청서를 첨부해 원장에게 보냄", "운영 통장 입금 요청액은 지출 예산에서 인건비와 임차료를 뺀 금액임. 인건비와 임차료는 관리 통장에서 직접 지급함"],
+        check: "승인 요청서 받기나 문안 복사를 한 번 눌러 봄", done: () => !!T.flags.flowDoc || stAt(m.bud) >= 3, targets: ["#fDoc", "#fMail"] },
+      { view: "budget", title: "원장, 상무 승인 기록", goal: "1차(원장), 2차(디지털대성 상무) 승인을 차례로 기록함", pre: budPre, month: budMonth,
+        how: ["실제로는 승인자가 로그인해 <b>승인</b>을 누르거나, 메일로 승인하면 받은 사람이 <b>승인 기록</b>을 누름", "연습에서는 메모 칸에 '메일 승인'처럼 적고 <b>승인 기록</b>을 누름. 1차 승인이 기록되고 2차 승인 단계로 넘어감", "2차 승인용 메일 문안으로 바뀐 것을 확인하고 같은 방법으로 한 번 더 기록함", "고칠 것이 있으면 사유를 적고 <b>반려</b>를 누름. 반려되면 작성자가 고쳐서 다시 제출함"],
+        check: "2차 승인까지 기록됨", done: () => stAt(m.bud) >= 4, targets: ["#fNote", "#fApprove"] },
+      { view: "budget", title: "입금 요청과 입금 확인", goal: "승인된 예산의 운영 자금이 운영 통장에 들어온 것을 기록함", pre: budPre, month: budMonth,
+        how: ["승인이 끝나면 '운영 통장 입금 요청' 단계가 됨. 입금 요청 문안을 복사해 자금 담당에게 보냄", "입금 요청액은 자동으로 계산됨. 빼는 항목은 기준정보의 '7 운영 통장 입금 요청에서 빼는 항목'에서 정함", "관리 통장에서 운영 통장으로 입금되면 입금액과 입금일을 확인하고 <b>입금 확인 기록</b>을 누름", "입금까지 끝난 예산은 고칠 수 없음"],
+        check: "입금 확인이 기록됨", done: () => stAt(m.bud) >= 5, targets: ["#fFundAmt", "#fFundDate", "#fFund"] },
       { view: "actual", title: "더존 원장 올리기", goal: `결산이 끝난 ${act}의 계정별원장을 올림`, pre: actPre, month: actMonth,
         acts: [{ label: "연습용 원장 넣기", run: fillLedger, help: "더존 계정별원장 모양의 예시를 붙여넣기 칸에 넣음. 월계 행, 잡이익, 다른 비용센터 줄, 미분류 줄이 섞여 있음" }, { label: "연습용 원장 엑셀 받기", run: downloadLedger, help: "같은 예시 원장을 엑셀 파일로 받음. '엑셀 파일 고르기'를 연습할 때 씀", show: () => canExport() }],
         how: [`연월이 ${act}인지 확인함`, "<b>연습용 원장 넣기</b>를 누르면 예시 원장이 붙여넣기 칸에 들어감. 실제로는 더존 엑셀에서 복사해 붙여넣음", "<b>붙여넣은 내용 읽기</b>를 누르고 읽은 결과를 확인함. 월계 행, 잡이익, 다른 비용센터 줄이 빠짐", `<b>${m.act} 원장으로 저장</b>을 누름`],
@@ -650,7 +685,18 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     ["#view-budget .seg [data-g]", "구분 필터", "고른 구분의 줄만 보여 줌. 저장된 내용은 바뀌지 않음"],
     ["#bXls", "엑셀 내보내기", "지금 화면의 예산을 엑셀 파일로 받음"],
     ["#bSave", "저장", "작성 중인 예산을 저장함. 제출 전까지 여러 번 저장할 수 있음"],
-    ["#bSubmit", "저장 후 제출", "저장하고 제출 일자를 기록함. 미분류 줄이 있으면 저장만 되고 제출은 되지 않음"],
+    ["#bSubmit", "저장 후 제출", "저장하고 제출 일자를 기록함. 제출하면 승인 단계로 넘어가고 회수하기 전까지 고칠 수 없음. 미분류 줄이 있으면 저장만 됨"],
+    ["#fDoc", "승인 요청서 받기(엑셀)", "예산 요약, 운영 통장 입금 요청액, 항목별 예산, 예산 상세가 든 엑셀 파일을 받음. 승인 요청 메일에 첨부함"],
+    ["#fMailBox", "메일 문안", "승인이나 입금을 요청하는 메일 본문. 금액과 사이트 주소가 자동으로 들어감"],
+    ["#fMail", "문안 복사", "메일 문안을 복사함. 메일 본문에 붙여넣어 보냄"],
+    ["#fMailto", "메일 앱 열기", "PC에 설정된 메일 프로그램으로 제목과 본문이 채워진 새 메일을 엶. 메일 프로그램이 없으면 문안 복사를 씀"],
+    ["#fNote", "메모", "승인이나 반려에 붙일 메모를 적음. 메일로 받은 승인을 대신 기록할 때와 반려할 때는 꼭 적어야 함"],
+    ["#fApprove", "승인", "지금 단계의 승인을 기록함. 승인자가 직접 누르면 직접 승인, 다른 사람이 누르면 메일 승인 기록으로 남음"],
+    ["#fReject", "반려", "사유를 적고 예산을 작성자에게 돌려보냄. 작성자가 고쳐서 다시 제출해야 함"],
+    ["#fWithdraw", "회수하여 수정", "제출한 예산을 다시 고칠 수 있게 되돌림. 받은 승인 기록이 지워지고 다시 제출해야 함. 두 번 눌러야 실행됨"],
+    ["#fFundAmt", "입금액(원)", "운영 통장에 실제로 들어온 금액. 처음에는 입금 요청액이 들어 있음"],
+    ["#fFundDate", "입금일", "운영 통장에 입금된 날짜"],
+    ["#fFund", "입금 확인 기록", "관리 통장에서 운영 통장으로 입금된 것을 확인해 기록함. 기록하면 이 달 예산 절차가 끝남"],
     ["#bReload", "최신 불러오기", "다른 사람이 먼저 저장한 최신 내용을 불러옴. 내가 고친 내용은 사라짐"],
     ["#bForce", "내 입력으로 덮어쓰기", "다른 사람이 저장한 내용 대신 내 입력으로 저장함"],
     ['#bBody [data-f="acct"]', "더존 계정", "더존 계정과목을 고름. 계정에 따라 기본 실적표 항목이 정해짐"],
@@ -727,6 +773,9 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
     ["#thrAmt", "점검 기준 금액", "차이가 이 금액 이상이어야 분석 화면에 점검 표시가 뜸"],
     ["#thrRate", "점검 기준 비율", "차이가 이 비율(%) 이상이어야 분석 화면에 점검 표시가 뜸"],
     ["#cfgCenter", "기준 비용센터", "원장을 올릴 때 이 비용센터가 아닌 줄을 뺄 수 있음"],
+    ["#view-rules [data-fl]", "결재선", "승인 단계별 직함, 이름, 로그인 ID를 적음. 로그인 ID를 넣으면 그 사람이 직접 승인할 수 있음"],
+    ["#flowMailOk", "메일 승인 대리 기록", "켜 두면 메일로 받은 승인을 다른 사람이 대신 기록할 수 있음. 끄면 지정된 승인자와 관리자만 승인을 기록함"],
+    ["#view-rules [data-fd]", "입금 구분", "이 항목을 운영 통장 입금 요청에 넣을지, 인건비나 임차료처럼 뺄지 고름"],
   ];
   function applyHelp() {
     HELP.forEach(([sel, name, text]) => document.querySelectorAll(sel).forEach(el => { if (el.dataset.help === text) return; el.dataset.help = text; el.dataset.helpName = name || ""; el.removeAttribute("title"); el.setAttribute("aria-description", text); }));
@@ -781,7 +830,7 @@ table.grid input:disabled, table.grid select:disabled { background: transparent;
   document.addEventListener("change", e => { const t = e.target; if (!t || !t.id) return; if (t.id === "unit" || t.id === "dY" || t.id === "dM") flag("tour"); if (t.id === "anY") flag("yoyYear"); }, true);
   const budTouch = e => { if (e.target.closest && e.target.closest("#bBody") && T.ym && U.bym === pm().bud) flag("budEdit"); };
   document.addEventListener("input", budTouch, true); document.addEventListener("change", budTouch, true);
-  document.addEventListener("click", e => { if (!e.target.closest) return; if (e.target.closest("#view-report [data-m]")) flag("report"); if (e.target.closest('#view-analysis [data-t="Y"]')) flag("yoyY"); }, true);
+  document.addEventListener("click", e => { if (!e.target.closest) return; if (e.target.closest("#view-report [data-m]")) flag("report"); if (e.target.closest("#fDoc, #fMail, #fMailto")) flag("flowDoc"); if (e.target.closest('#view-analysis [data-t="Y"]')) flag("yoyY"); }, true);
   window.addEventListener("resize", fitBody);
 
   // 위쪽 띠 버튼
@@ -835,8 +884,16 @@ const ROWMAP = Object.fromEntries(ROWS.map(r => [r[0], r]));
 const TOTALS = new Set(["매출액", "판매비와 일반관리비", "영업이익(직접)"]);
 const GORD = { "매출": 0, "고정비": 1, "변동비": 2, "이익조정": 3, "미분류": 4, "제외": 5 };
 
+// ===== 결재선과 운영 통장 입금 요청 =====
+// 결재선 기본값. 이름과 로그인 ID는 기준정보 화면에서 넣음
+const FLOW_DEF = { author: { title: "부산대성 팀장", name: "", id: "" }, a1: { title: "부산대성 원장", name: "", id: "" }, a2: { title: "디지털대성 상무", name: "", id: "" }, fund: { title: "디지털대성 자금 담당", name: "", id: "" } };
+function prepFlow(f) { f = f || {}; const o = { mailOk: f.mailOk !== false }; for (const k of ["author", "a1", "a2", "fund"]) o[k] = Object.assign({}, FLOW_DEF[k], f[k] || {}); return o; }
+// 입금 요청에서 빼는 항목 기본값: 인건비와 임차료는 관리 통장에서 직접 지급하고, 감가상각비 같은 항목은 돈이 나가지 않음
+const FUND_CLS = ["인건비", "임차료", "기타 제외"];
+const FUND_DEF = { 강사급여: "인건비", 출장강사: "인건비", 특강료: "인건비", 성과급: "인건비", 직원급여: "인건비", "4대보험": "인건비", 퇴직충당금: "인건비", "임대료(학원)": "임차료", 감가상각비: "기타 제외", "리스회계 인식": "기타 제외" };
+function prepFund(f) { return Object.assign({}, f && typeof f === "object" ? f : FUND_DEF); }
 function prepCfg(c) {
-  const cfg = { acct: c.acct || [], rules: c.rules || [], std: (c.std || []).map(s => Array.isArray(s) ? s : [(s && s.a) || "", (s && s.t) || ""]), thr: Object.assign({ amt: 500000, rate: 0.1 }, c.thr || {}), center: c.center || "" };
+  const cfg = { acct: c.acct || [], rules: c.rules || [], std: (c.std || []).map(s => Array.isArray(s) ? s : [(s && s.a) || "", (s && s.t) || ""]), thr: Object.assign({ amt: 500000, rate: 0.1 }, c.thr || {}), center: c.center || "", flow: prepFlow(c.flow), fund: prepFund(c.fund) };
   // 엑셀 VLOOKUP처럼 같은 계정이 두 번 있으면 위쪽(먼저 나온) 매핑을 씀
   cfg.acctMap = {};
   for (const a of cfg.acct) if (a.a && !Object.prototype.hasOwnProperty.call(cfg.acctMap, a.a)) cfg.acctMap[a.a] = a.i || "";
@@ -904,6 +961,17 @@ function num(v) {
 function hasVal(v) { return v !== "" && v != null && String(v).trim() !== ""; }
 function budgetAmt(l) { return hasVal(l.direct) ? num(l.direct) : num(l.qty) * num(l.price); }
 function ledgerAmt(l) { return num(l.dr) - num(l.cr); }
+// 운영 통장 입금 요청액 = 지출 예산(고정비+변동비) - 인건비 - 임차료 - 기타 제외
+function fundCalc(cfg, lines) {
+  const by = {}; for (const l of lines || []) { if (!l.acct) continue; const it = classify(cfg, l.acct, l.memo, l.ovr).item, g = groupOf(it); if (g !== "고정비" && g !== "변동비") continue; by[it] = (by[it] || 0) + budgetAmt(l); }
+  const r = { spend: 0, 인건비: 0, 임차료: 0, 기타: 0, req: 0, items: [] };
+  for (const it of LEAVES) { if (!(it in by)) continue; const v = by[it], cls = FUND_CLS.includes(cfg.fund[it]) ? cfg.fund[it] : ""; r.spend += v; if (cls === "인건비") r.인건비 += v; else if (cls === "임차료") r.임차료 += v; else if (cls) r.기타 += v; else r.req += v; r.items.push({ item: it, amt: v, cls }); }
+  return r;
+}
+// 예산 진행 상태: 미작성 → 작성 중 → 제출 → 1차 승인 → 2차 승인 → 입금
+const BST = ["none", "draft", "sub", "a1", "a2", "fund"];
+function bState(doc) { if (!doc) return "none"; if (BST.includes(doc.st)) return doc.st; return doc.submittedAt ? "sub" : "draft"; }
+function bStateLabel(cfg, doc) { const s = bState(doc), f = cfg.flow; return s === "none" ? "미작성" : s === "draft" ? (doc.flow && doc.flow.reject ? "반려됨, 수정 필요" : "작성 중, 미제출") : s === "sub" ? `제출됨, ${f.a1.title} 승인 대기` : s === "a1" ? `${f.a1.title} 승인, ${f.a2.title} 승인 대기` : s === "a2" ? "승인 완료, 입금 대기" : "입금 완료"; }
 function ym(y, m) { return `${y}-${String(m).padStart(2, "0")}`; }
 function ymParts(s) { return [Number(s.slice(0, 4)), Number(s.slice(5, 7))]; }
 function ymAdd(s, n) { let [y, m] = ymParts(s); m += n; while (m > 12) { m -= 12; y++; } while (m < 1) { m += 12; y--; } return ym(y, m); }
@@ -1199,7 +1267,7 @@ function renderDashboard(el) {
     ${kpi(`누계 매출(1~${m}월)`, moneyTxt(yav["매출액"]), `누계 예산 대비 ${pct(ach(yav["매출액"], ybv["매출액"]), false) || "예산 없음"} | 전년 동기 ${pct(rate(yav["매출액"], ypv["매출액"])) || "-"}`, ach(yav["매출액"], ybv["매출액"]))}
     ${kpi("점검 필요", `${flags.length}건`, `예산초과 ${flags.filter(f => f.f === "예산초과").length} | 목표미달 ${flags.filter(f => f.f === "목표미달").length} | 원장 미분류 ${lst.unc}`, null)}
   </div>
-  <div class="banner ${nb && nb.submittedAt ? "info" : (today() > dueOf(nx) ? "bad" : "")}">${ymLabel(nx)} 예산: ${nb && nb.submittedAt ? `제출 완료(${esc(nb.submittedAt)}${nb.submittedAt > dueOf(nx) ? ", 기한 지남" : ""})` : nb ? "작성 중, 미제출" : "미작성"} | 제출 기한 ${dueOf(nx)} <a class="btn sm" href="#budget">예산 입력으로</a></div>
+  <div class="banner ${BST.indexOf(bState(nb)) >= 2 ? "info" : (today() > dueOf(nx) ? "bad" : "")}">${ymLabel(nx)} 예산: ${esc(bStateLabel(S.cfg, nb))}${BST.indexOf(bState(nb)) >= 2 && nb.submittedAt ? ` (제출 ${esc(nb.submittedAt)}${nb.submittedAt > dueOf(nx) ? ", 기한 지남" : ""})` : ""} | 제출 기한 ${dueOf(nx)} <a class="btn sm" href="#budget">예산 입력으로</a></div>
   <div class="grid2">
     <div class="panel"><div class="panel-h"><span class="cap">그림 1  월별 매출액 (${y}년)</span><span class="src">단위 ${UNIT_LB()}</span></div><div class="chart" id="c1"></div><span class="src">자료: 매출및조정(실적), 예산 입력(계획), 전년은 ${y - 1}년 실적</span></div>
     <div class="panel"><div class="panel-h"><span class="cap">그림 2  월별 영업이익(직접) (${y}년)</span><span class="src">단위 ${UNIT_LB()}</span></div><div class="chart" id="c2"></div><span class="src">자료: 실적 = 원장 + 매출및조정, 계획 = 예산 입력</span></div>
@@ -1253,8 +1321,8 @@ function renderBudget(el) {
   if (!U.bym) U.bym = ymAdd(curYm(), 1);
   { const dd = D().B[U.bym]; if (!U.bd || U.bd.ym !== U.bym || (!U.bd.dirty && !U.bd.conflict && (dd ? dd.rev || 0 : 0) !== U.bd.baseRev)) loadBudgetDraft(U.bym); }
   buildDatalists();
-  const bd = U.bd, doc = D().B[bd.ym], can = writable(), due = dueOf(bd.ym);
-  const st = doc && doc.submittedAt ? (doc.submittedAt <= due ? ["f-ok", `제출 완료 ${esc(doc.submittedAt)}`] : ["f-warn", `기한 후 제출 ${esc(doc.submittedAt)}`]) : (today() > due ? ["f-bad", "미제출(기한 지남)"] : ["f-info", "미제출"]);
+  const bd = U.bd, doc = D().B[bd.ym], bst = bState(doc), locked = BST.indexOf(bst) >= 2, can = writable() && !locked, due = dueOf(bd.ym);
+  const st = bst === "fund" ? ["f-ok", "입금 완료"] : bst === "a2" ? ["f-ok", "승인 완료"] : locked ? (doc.submittedAt && doc.submittedAt > due ? ["f-warn", "기한 후 제출, 승인 진행 중"] : ["f-info", "제출됨, 승인 진행 중"]) : doc && doc.flow && doc.flow.reject ? ["f-bad", "반려됨"] : (today() > due ? ["f-bad", "미제출(기한 지남)"] : ["f-info", "미제출"]);
   const sm = budgetSummary(bd.lines);
   const shown = bd.lines.map((l, i) => [l, i]).filter(([l]) => { if (U.bfilter === "전체") return true; const g = groupOf(classify(S.cfg, l.acct, l.memo, l.ovr).item); return g === U.bfilter; });
   el.innerHTML = `
@@ -1270,6 +1338,8 @@ function renderBudget(el) {
   ${bd.conflict ? `<div class="banner bad"><span>다른 사람이 이 달 예산을 먼저 저장함. 최신 내용을 불러오거나 내 입력으로 덮어씀</span><button class="btn sm" id="bReload">최신 불러오기</button><button class="btn sm warn" id="bForce">내 입력으로 덮어쓰기</button></div>` : ""}
   ${bd.dirty ? `<div class="banner"><span>저장하지 않은 변경이 있음</span></div>` : ""}
   ${sm.noAcct ? `<div class="banner bad"><span>더존 계정 없이 항목만 고른 줄 ${sm.noAcct}개(${won(sm.noAcctAmt)}원)는 엑셀 양식과 같이 실적표 예산에 들어가지 않음. 계정을 채워야 함</span></div>` : ""}
+  ${flowPanel(bd, doc)}
+  ${locked && writable() ? `<div class="banner info"><span>제출한 예산이라 고칠 수 없음. 고치려면 위의 '회수하여 수정'을 누름</span></div>` : ""}
   <div class="toolbar">
     <button class="btn" id="bAdd" ${can ? "" : "disabled"}>줄 추가</button>
     <button class="btn" id="bStd" ${can ? "" : "disabled"}>기본 목록 불러오기</button>
@@ -1281,7 +1351,7 @@ function renderBudget(el) {
     <button class="btn pri" id="bSave" ${can ? "" : "disabled"}>저장</button>
     <button class="btn pri" id="bSubmit" ${can ? "" : "disabled"}>저장 후 제출</button>
   </div>
-  ${!can && !S.demo ? `<div class="note">${S.conn === "off" ? "공유 저장소에 연결되지 않아 읽기만 가능함" : "이 공유 링크는 읽기 전용임. 입력하려면 소유자에게 참여자 이상 권한을 요청함"}</div>` : ""}
+  ${!writable() && !S.demo ? `<div class="note">${S.conn === "off" ? "공유 저장소에 연결되지 않아 읽기만 가능함" : "이 공유 링크는 읽기 전용임. 입력하려면 소유자에게 참여자 이상 권한을 요청함"}</div>` : ""}
   ${bd.lines.length ? `<div class="tbl tall"><table class="grid"><thead><tr><th>#</th><th>더존 계정</th><th>적요</th><th>구분</th><th>실적표 항목</th><th class="num">수량</th><th class="num">단가</th><th class="num">직접입력 금액</th><th class="num">예산금액</th><th>산출근거</th><th>항목 직접지정</th><th></th></tr></thead>
   <tbody id="bBody">${shown.map(([l, i]) => bRow(l, i, can)).join("")}</tbody></table></div>` : `<div class="empty">${ymLabel(bd.ym)} 예산이 아직 없음. '기본 목록 불러오기'로 표준 적요 ${S.cfg.std.length}줄을 넣거나 '전월 예산 복사'로 시작함</div>`}
   <div class="note">색칠된 입력 칸만 수정함. 구분, 실적표 항목, 예산금액은 자동임. 예산금액 = 수량 x 단가, 직접입력 금액이 있으면 그 금액이 우선함. 매출 차감 항목은 음수로 입력함. 작성: ${doc ? `${who(doc.updatedBy)} ${when(doc.updatedAt)}` : "-"}</div>`;
@@ -1296,6 +1366,7 @@ function renderBudget(el) {
   if ($("#bXls")) $("#bXls").onclick = () => exportBudget(bd);
   $("#bSave").onclick = () => saveBudget(false);
   $("#bSubmit").onclick = () => saveBudget(true);
+  bindFlow(el, bd, doc);
   if ($("#bReload")) $("#bReload").onclick = () => { loadBudgetDraft(bd.ym); render(); };
   if ($("#bForce")) $("#bForce").onclick = () => { bd.force = true; saveBudget(!!bd.submitIntent); };
   const tb = $("#bBody"); if (!tb) return;
@@ -1319,16 +1390,147 @@ function bRow(l, i, can) {
   <td>${can ? `<button class="btn sm" data-act="del">삭제</button>` : ""}</td></tr>`;
 }
 function refreshRow(tr, l) { const c = classify(S.cfg, l.acct, l.memo, l.ovr); tr.querySelector('[data-o="g"]').innerHTML = chip(groupOf(c.item)); tr.querySelector('[data-o="item"]').textContent = c.item; tr.querySelector('[data-o="amt"]').textContent = won(budgetAmt(l)); }
-function refreshSummary() { const sm = budgetSummary(U.bd.lines); const bs = document.querySelectorAll("#view-budget .sum b"); const v = [won(sm.매출), won(sm.고정비), won(sm.변동비), won(sm.이익조정), won(sm.op)]; v.forEach((t, i) => { if (bs[i]) bs[i].textContent = t; }); if (bs[5]) bs[5].innerHTML = `${sm.n}줄 / <span class="${sm.unc ? "neg" : ""}">${sm.unc}</span>`; }
+function refreshSummary() { const sm = budgetSummary(U.bd.lines); const bs = document.querySelectorAll("#view-budget .sum b"); const v = [won(sm.매출), won(sm.고정비), won(sm.변동비), won(sm.이익조정), won(sm.op)]; v.forEach((t, i) => { if (bs[i]) bs[i].textContent = t; }); if (bs[5]) bs[5].innerHTML = `${sm.n}줄 / <span class="${sm.unc ? "neg" : ""}">${sm.unc}</span>`; const fr = $("#fundReq"); if (fr) { const fc = fundCalc(S.cfg, U.bd.lines); fr.textContent = wonTxt(fc.req); const fn2 = $("#fundNote"); if (fn2) fn2.textContent = fundNoteTxt(fc); } }
+// ===== 승인 진행: 제출 → 1차 승인 → 2차 승인 → 운영 통장 입금 =====
+function flowName(k) { const x = S.cfg.flow[k]; return [x.title, x.name].filter(Boolean).join(" "); }
+function flowDirect(k) { const id = S.cfg.flow[k].id; return !!S.uid && !!id && String(id).trim().toLowerCase() === String(S.uid).toLowerCase(); }
+function flowMay(k) { return writable() && (flowDirect(k) || S.isAdmin || S.cfg.flow.mailOk); }
+function flowNext(doc) { const s = bState(doc); return s === "sub" ? "a1" : s === "a1" ? "a2" : s === "a2" ? "fund" : null; }
+function siteUrl() { return (window.BDB_EXT && window.BDB_EXT.siteUrl) || (location.origin + location.pathname); }
+const wonTxt = v => nf.format(Math.round(v || 0));
+const fundNoteTxt = fc => `지출 예산 ${wonTxt(fc.spend)}원에서 인건비 ${wonTxt(fc.인건비)}원, 임차료 ${wonTxt(fc.임차료)}원, 기타 제외 ${wonTxt(fc.기타)}원을 뺀 금액. 인건비와 임차료는 관리 통장에서 직접 지급함`;
+function flowBody(fw) { const o = { mailOk: !!fw.mailOk }; for (const k of ["author", "a1", "a2", "fund"]) o[k] = { title: String(fw[k].title || "").trim(), name: String(fw[k].name || "").trim(), id: String(fw[k].id || "").trim() }; return o; }
+function fundBody(fd) { return Object.fromEntries(Object.entries(fd || {}).filter(([, v]) => FUND_CLS.includes(v))); }
+const FLB = { title: "직함", name: "이름", id: "로그인 ID" };
+function mailDraft(ymk, lines, doc) {
+  const f = S.cfg.flow, k = flowNext(doc); if (!k) return null;
+  const sm = budgetSummary(lines), fc = fundCalc(S.cfg, lines), fl = (doc && doc.flow) || {}, to = f[k];
+  const call = to.name ? `${to.name} ${String(to.title || "").trim().split(/\s+/).pop()}`.trim() : to.title;
+  const head = k === "fund" ? `${ymLabel(ymk)} 예산 승인이 끝나 운영 통장 입금을 요청드립니다.` : k === "a2" ? `${ymLabel(ymk)} 예산이 ${f.a1.title} 승인(${String((fl.a1 && fl.a1.at) || "").slice(0, 10)})을 받아 승인을 요청드립니다.` : `${ymLabel(ymk)} 예산을 작성해 승인을 요청드립니다.`;
+  const body = [`${call}님께`, "", head, "",
+    `1. 매출 예산: ${wonTxt(sm.매출)}원`,
+    `2. 지출 예산: ${wonTxt(fc.spend)}원 (고정비 ${wonTxt(sm.고정비)}원, 변동비 ${wonTxt(sm.변동비)}원)`,
+    `3. 예상 영업이익(직접): ${wonTxt(sm.op)}원`,
+    `4. 운영 통장 입금 요청액: ${wonTxt(fc.req)}원`,
+    `   지출 예산에서 인건비 ${wonTxt(fc.인건비)}원, 임차료 ${wonTxt(fc.임차료)}원, 기타 제외 ${wonTxt(fc.기타)}원을 뺀 금액입니다.`, "",
+    "상세 내역은 첨부한 승인 요청서와 아래 주소의 예산 입력 화면에서 확인하실 수 있습니다.", siteUrl() + "#budget", "",
+    `${flowName("author")} 드림`].join("\n");
+  return { to: /@/.test(to.id || "") ? String(to.id).trim() : "", toName: call, subject: `[부산대성기숙학원] ${ymLabel(ymk)} 예산 ${k === "fund" ? "입금 요청" : "승인 요청"}`, body };
+}
+function flowPanel(bd, doc) {
+  const st = bState(doc), idx = BST.indexOf(st), fl = (doc && doc.flow) || {}, fc = fundCalc(S.cfg, bd.lines), w = writable(), k = flowNext(doc);
+  const day = x => esc(String(x || "").slice(0, 10)), via = x => (x.via === "proxy" ? "기록" : "직접 승인");
+  const cells = [
+    ["작성", flowName("author"), doc ? day(doc.updatedAt) : ""],
+    ["제출", `기한 ${dueOf(bd.ym)}`, doc ? day(doc.lastSubmittedAt || doc.submittedAt) : ""],
+    ["1차 승인", flowName("a1"), fl.a1 ? `${day(fl.a1.at)} ${via(fl.a1)}` : ""],
+    ["2차 승인", flowName("a2"), fl.a2 ? `${day(fl.a2.at)} ${via(fl.a2)}` : ""],
+    ["운영 통장 입금", flowName("fund"), fl.fund ? `${day(fl.fund.date)} ${wonTxt(fl.fund.amt)}원` : ""],
+  ];
+  const steps = cells.map(([t, who2, sub], i) => `<div class="fstep ${idx > i ? "done" : idx === i ? "cur" : ""}"><span class="fno">${i + 1}단계</span><b>${t}</b><span>${esc(who2)}</span><span class="fsub">${idx > i ? (sub || "완료") : idx === i ? "지금 할 단계" : "대기"}</span></div>`).join("");
+  const fund = `<div class="fund"><span>운영 통장 입금 요청액</span><b><span id="fundReq">${wonTxt(fc.req)}</span>원</b><span class="note" id="fundNote">${fundNoteTxt(fc)}</span></div>`;
+  const md = mailDraft(bd.ym, bd.lines, doc);
+  const docBtn = canExport() ? `<button class="btn" id="fDoc">승인 요청서 받기(엑셀)</button>` : "";
+  const mailBox = md ? `<div class="mail"><div class="src">받는 사람: ${esc(md.toName)}${md.to ? ` (${esc(md.to)})` : ""} | 제목: ${esc(md.subject)}</div>
+      <label class="sr" for="fMailBox">메일 문안</label><textarea id="fMailBox" readonly rows="9">${esc(md.body)}</textarea>
+      <div class="toolbar"><button class="btn" id="fMail">문안 복사</button><a class="btn" id="fMailto" href="mailto:${encodeURIComponent(md.to)}?subject=${encodeURIComponent(md.subject)}&body=${encodeURIComponent(md.body)}">메일 앱 열기</a>${docBtn}</div></div>` : "";
+  let act = "";
+  if (idx <= 1) {
+    const rj = fl.reject;
+    act = `${rj && st === "draft" ? `<div class="banner bad"><span>반려됨(${day(rj.at)}, ${who(rj.by)}). 사유: ${esc(rj.note || "적지 않음")}. 고친 뒤 다시 제출함</span></div>` : ""}<div class="note">예산을 다 넣고 '저장 후 제출'을 누르면 승인 요청 단계로 넘어감. 제출한 예산은 회수하기 전까지 고칠 수 없음</div>`;
+  } else if (k === "a1" || k === "a2") {
+    const may = flowMay(k), direct = flowDirect(k);
+    act = `<div class="fact"><b>${k === "a1" ? "1차" : "2차"} 승인 요청: ${esc(flowName(k))}</b>
+      <div class="note">아래 문안을 복사해 메일로 보내고 승인 요청서를 첨부함. 승인자가 이 화면에서 직접 승인하거나, 메일로 승인을 받으면 받은 사람이 여기에 기록함</div>
+      ${mailBox}
+      ${may ? `<div class="toolbar"><label class="sr" for="fNote">메모</label><input type="text" id="fNote" placeholder="${direct ? "메모(선택)" : "메일로 승인 받은 날짜 등 메모(필수)"}" style="flex:1 1 220px"><button class="btn pri" id="fApprove">${direct ? "승인" : "승인 기록"}</button><button class="btn warn" id="fReject">반려</button></div>` : `<div class="note">${w ? "승인은 지정된 승인자나 관리자만 기록할 수 있음" : "읽기 전용이라 기록할 수 없음"}</div>`}</div>`;
+  } else if (k === "fund") {
+    act = `<div class="fact"><b>운영 통장 입금 요청: ${esc(flowName("fund"))}</b>
+      <div class="note">승인이 끝났음. 관리 통장에서 운영 통장으로 입금을 요청하고, 입금되면 금액과 날짜를 기록함</div>
+      ${mailBox}
+      ${flowMay("fund") ? `<div class="toolbar"><label for="fFundAmt">입금액(원)</label><input class="num" type="text" id="fFundAmt" inputmode="numeric" value="${wonTxt(fc.req)}" style="width:150px"><label for="fFundDate">입금일</label><input type="date" id="fFundDate" value="${today()}"><label class="sr" for="fNote">메모</label><input type="text" id="fNote" placeholder="메모(선택)" style="flex:1 1 160px"><button class="btn pri" id="fFund">입금 확인 기록</button></div>` : ""}</div>`;
+  } else {
+    const d = Math.round((fl.fund && fl.fund.amt) || 0) - Math.round(fc.req);
+    act = `<div class="fact"><b>입금 완료</b><div class="note">${day(fl.fund && fl.fund.date)}에 ${wonTxt(fl.fund && fl.fund.amt)}원 입금 확인(${who(fl.fund && fl.fund.by)}). 요청액 ${wonTxt(fc.req)}원${d ? `, 차이 ${wonTxt(d)}원` : ""}</div><div class="toolbar">${docBtn}</div></div>`;
+  }
+  const back = w && idx >= 2 && idx <= 4 ? `<div class="toolbar"><button class="btn" id="fWithdraw">회수하여 수정</button><span class="note">회수하면 받은 승인 기록이 지워지고 다시 제출해야 함</span></div>` : "";
+  const f = S.cfg.flow, lab = { submit: "제출", a1: `${f.a1.title} 승인`, a2: `${f.a2.title} 승인`, reject: "반려", withdraw: "회수", fund: "입금 확인" };
+  const log = doc && (doc.log || []).length ? `<div class="flog">이력: ${doc.log.slice(-6).map(e => `${day(e.at)} ${esc(lab[e.act] || e.act)} ${who(e.by)}${e.note ? ` (${esc(e.note)})` : ""}`).join(" / ")}</div>` : "";
+  return `<div class="panel flow" id="flowPanel"><div class="panel-h"><span class="cap">승인 진행</span><span class="src">${esc(bStateLabel(S.cfg, doc))}</span></div><div class="fsteps">${steps}</div>${fund}${act}${back}${log}</div>`;
+}
+function bindFlow(el, bd, doc) {
+  const q = s => el.querySelector(s), note = () => (q("#fNote") ? q("#fNote").value.trim() : "");
+  if (q("#fDoc")) q("#fDoc").onclick = () => exportApproval(bd, doc);
+  if (q("#fMail")) q("#fMail").onclick = async () => { const box = q("#fMailBox"); try { await navigator.clipboard.writeText(box.value); toast("메일 문안을 복사함"); } catch (e) { box.focus(); box.select(); toast("자동 복사가 되지 않음. 선택된 문안을 Ctrl+C로 복사함"); } };
+  if (q("#fApprove")) q("#fApprove").onclick = () => { const k = flowNext(doc); if (!flowDirect(k) && !note()) { toast("메일로 받은 승인을 기록할 때는 받은 날짜 등 메모를 적어야 함"); q("#fNote").focus(); return; } flowAct("approve", { note: note() }); };
+  if (q("#fReject")) q("#fReject").onclick = () => { if (!note()) { toast("반려 사유를 메모에 적어야 함"); q("#fNote").focus(); return; } flowAct("reject", { note: note() }); };
+  if (q("#fWithdraw")) q("#fWithdraw").onclick = e => { const b = e.currentTarget; if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "한 번 더 누르면 회수함"; return; } flowAct("withdraw", {}); };
+  if (q("#fFund")) q("#fFund").onclick = () => { const amt = parseNum(q("#fFundAmt").value), date = q("#fFundDate").value; if (!isFinite(amt) || amt <= 0) { toast("입금액을 숫자로 넣어야 함"); return; } if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast("입금일을 넣어야 함"); return; } flowAct("fund", { amt, date, note: note() }); };
+}
+async function flowAct(act, p) {
+  if (!writable() || !U.bd) return; const ymk = U.bd.ym, ref = db.doc("budget/" + ymk); let msg = "";
+  try {
+    await queueWrite(ref.path, async () => {
+      const fresh = await ref.get(); if (!fresh.exists) throw { code: "state" };
+      const d = fresh.data(), st = bState(d), fl = Object.assign({ a1: null, a2: null, fund: null, reject: null }, d.flow || {}), now = new Date().toISOString(), by = S.uid || null, f = S.cfg.flow;
+      if ((d.rev || 0) !== U.bd.baseRev) throw { code: "stale" };
+      let next = st, code = act;
+      if (act === "approve") { const k = st === "sub" ? "a1" : st === "a1" ? "a2" : null; if (!k || !flowMay(k)) throw { code: "state" }; fl[k] = { at: now, by, via: flowDirect(k) ? "direct" : "proxy", note: p.note || "" }; next = k; code = k; msg = `${f[k].title} 승인을 기록함`; }
+      else if (act === "reject") { const k = st === "sub" ? "a1" : st === "a1" ? "a2" : null; if (!k || !flowMay(k)) throw { code: "state" }; fl.reject = { at: now, by, step: k, note: p.note || "" }; fl.a1 = null; fl.a2 = null; next = "draft"; msg = "반려를 기록함. 작성자가 고쳐서 다시 제출함"; }
+      else if (act === "withdraw") { if (!["sub", "a1", "a2"].includes(st)) throw { code: "state" }; fl.a1 = null; fl.a2 = null; next = "draft"; msg = "회수함. 고친 뒤 다시 제출함"; }
+      else if (act === "fund") { if (st !== "a2" || !flowMay("fund")) throw { code: "state" }; fl.fund = { at: now, by, amt: p.amt, date: p.date, note: p.note || "" }; next = "fund"; msg = "입금 확인을 기록함"; }
+      else throw { code: "state" };
+      const body = { ...d, st: next, flow: fl, log: [...(d.log || []), { at: now, by, act: code, note: p.note || "" }].slice(-30), rev: (d.rev || 0) + 1 };
+      if (tooBig(body)) throw { code: "big" };
+      await ref.set(body); S.B = { ...S.B, [ymk]: body }; S.ver++; U.bd.baseRev = body.rev;
+    });
+    toast(msg); render();
+  } catch (e) { const c = e && e.code; toast(c === "stale" ? "예산이 그사이 바뀌었음. 화면을 다시 확인함" : c === "state" ? "지금 단계에서는 할 수 없는 동작임" : c === "big" ? TOO_BIG : dbErr(e)); render(); }
+}
+// 승인 요청서(엑셀): 메일에 첨부하는 한 장 요약과 예산 상세
+function budgetRows(bd) {
+  const rows = [["연월", "더존 계정", "적요", "구분", "실적표 항목", "수량", "단가", "직접입력 금액", "예산금액", "산출근거", "항목 직접지정"]];
+  bd.lines.forEach(l => { const c = classify(S.cfg, l.acct, l.memo, l.ovr); rows.push([bd.ym, l.acct, l.memo, groupOf(c.item), c.item, hasVal(l.qty) ? num(l.qty) : "", hasVal(l.price) ? num(l.price) : "", hasVal(l.direct) ? num(l.direct) : "", budgetAmt(l), l.basis || "", l.ovr || ""]); });
+  return rows;
+}
+function exportApproval(bd, doc) {
+  if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
+  const f = S.cfg.flow, fl = (doc && doc.flow) || {}, fc = fundCalc(S.cfg, bd.lines), A = agg(), k = bd.ym, day = x => String(x || "").slice(0, 10);
+  const by = {}; bd.lines.forEach(l => { if (!l.acct) return; const it = classify(S.cfg, l.acct, l.memo, l.ovr).item; by[it] = (by[it] || 0) + budgetAmt(l); });
+  const cur = rowVals(it => by[it] || 0), pk = ymAdd(k, -1), yk = ymAdd(k, -12);
+  const prev = rowVals(it => (A.bud[pk] && A.bud[pk][it]) || 0), yoy = rowVals(it => (A.act[yk] && A.act[yk][it]) || 0);
+  const via = x => (x ? (x.via === "proxy" ? "메일 승인 기록" : "직접 승인") + (x.note ? ": " + x.note : "") : "");
+  const rows = [[`부산대성기숙학원 ${ymLabel(k)} 예산 승인 요청서`], [],
+    ["대상 연월", k, "제출 기한", dueOf(k), "진행 상태", bStateLabel(S.cfg, doc)], [],
+    ["결재", "작성", "제출", "1차 승인", "2차 승인", "운영 통장 입금"],
+    ["담당", flowName("author"), "", flowName("a1"), flowName("a2"), flowName("fund")],
+    ["일자", doc ? day(doc.updatedAt) : "", doc ? day(doc.lastSubmittedAt || doc.submittedAt) : "", day(fl.a1 && fl.a1.at), day(fl.a2 && fl.a2.at), day(fl.fund && fl.fund.date)],
+    ["비고", "", "", via(fl.a1), via(fl.a2), fl.fund ? Math.round(fl.fund.amt) : ""], [],
+    ["1 예산 요약(원)", "이번 예산", "전월 예산", "증감", "전년 동월 실적"]];
+  for (const lb of ["매출액", "고정지출", "유동지출", "판매비와 일반관리비", "영업이익(직접)"]) rows.push([lb, Math.round(cur[lb]), Math.round(prev[lb]), Math.round(cur[lb] - prev[lb]), Math.round(yoy[lb])]);
+  rows.push([], ["2 운영 통장 입금 요청액(원)", "금액"],
+    ["지출 예산 합계(고정지출 + 유동지출)", Math.round(fc.spend)],
+    ["(-) 인건비: 관리 통장에서 직접 지급", Math.round(fc.인건비)],
+    ["(-) 임차료: 관리 통장에서 직접 지급", Math.round(fc.임차료)],
+    ["(-) 기타 제외: 돈이 나가지 않는 항목 등", Math.round(fc.기타)],
+    ["운영 통장 입금 요청액", Math.round(fc.req)], [],
+    ["3 항목별 예산(원)", "구분", "이번 예산", "전월 예산", "증감", "입금 구분"]);
+  for (const it of LEAVES) { const c = by[it] || 0, p = (A.bud[pk] && A.bud[pk][it]) || 0; if (!c && !p) continue; const g = groupOf(it), cls = FUND_CLS.includes(S.cfg.fund[it]) ? S.cfg.fund[it] : ""; rows.push([it, g, Math.round(c), Math.round(p), Math.round(c - p), g === "고정비" || g === "변동비" ? (cls ? cls + "(입금 요청 제외)" : "입금 요청") : ""]); }
+  const ws = XLSX.utils.aoa_to_sheet(rows); ws["!cols"] = [{ wch: 38 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 22 }];
+  const ws2 = XLSX.utils.aoa_to_sheet(budgetRows(bd)); ws2["!cols"] = [{ wch: 9 }, { wch: 20 }, { wch: 34 }, { wch: 8 }, { wch: 20 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "승인요청서"); XLSX.utils.book_append_sheet(wb, ws2, "예산상세"); saveXlsx(wb, `부산대성_예산승인요청서_${k}`);
+}
 async function saveBudget(submit) {
   if (!writable() || !U.bd) return; const bd = U.bd; const ref = db.doc("budget/" + bd.ym);
   try {
     const fresh = await ref.get(); const fd = fresh.exists ? fresh.data() : null; const rev = fd ? (fd.rev || 0) : 0;
     if (rev !== bd.baseRev && !bd.force) { bd.conflict = true; bd.submitIntent = submit; render(); return; }
+    if (fd && BST.indexOf(bState(fd)) >= 2) { toast("제출한 예산은 고칠 수 없음. 회수한 뒤 고침"); bd.force = false; loadBudgetDraft(bd.ym); render(); return; }
     const lines = bd.lines.filter(l => l.acct || l.memo || hasVal(l.direct) || hasVal(l.qty)).map(l => ({ id: l.id, acct: l.acct || "", memo: l.memo || "", qty: l.qty ?? "", price: l.price ?? "", direct: l.direct ?? "", basis: l.basis || "", ovr: l.ovr || "" }));
     const unc = lines.filter(l => classify(S.cfg, l.acct, l.memo, l.ovr).item === "미분류").length;
     let msg = ""; if (submit && unc) { msg = `저장함. 미분류 ${unc}줄이 있어 제출은 하지 않음`; submit = false; }
-    const body = { ym: bd.ym, lines, rev: rev + 1, updatedBy: S.uid || null, updatedAt: new Date().toISOString(), submittedAt: submit ? ((fd && fd.submittedAt) || today()) : (fd && fd.submittedAt) || null, submittedBy: submit ? ((fd && fd.submittedBy) || S.uid || null) : (fd && fd.submittedBy) || null, lastSubmittedAt: submit ? today() : (fd && fd.lastSubmittedAt) || null };
+    const body = { ym: bd.ym, lines, rev: rev + 1, updatedBy: S.uid || null, updatedAt: new Date().toISOString(), submittedAt: submit ? ((fd && fd.submittedAt) || today()) : (fd && fd.submittedAt) || null, submittedBy: submit ? ((fd && fd.submittedBy) || S.uid || null) : (fd && fd.submittedBy) || null, lastSubmittedAt: submit ? today() : (fd && fd.lastSubmittedAt) || null,
+      st: submit ? "sub" : "draft", flow: { a1: null, a2: null, fund: null, reject: submit ? null : ((fd && fd.flow && fd.flow.reject) || null) }, log: [...((fd && fd.log) || []), ...(submit ? [{ at: new Date().toISOString(), by: S.uid || null, act: "submit", note: "" }] : [])].slice(-30) };
     if (tooBig(body)) { toast(TOO_BIG); return; }
     await queueWrite(ref.path, () => ref.set(body));
     S.B = { ...S.B, [bd.ym]: body }; S.ver++;
@@ -1586,7 +1788,7 @@ function renderAnalysis(el) {
     <div class="sum"><span>예산 미분류</span><b class="${bst.unc ? "neg" : ""}">${bst.unc}줄</b></div>
     <div class="sum"><span>원장 미분류</span><b class="${lst.unc ? "neg" : ""}">${lst.unc}줄 ${lst.unc ? won(lst.uncAmt) : ""}</b></div>
     <div class="sum"><span>원장 실적 제외액</span><b>${won(lst.exc)}</b></div>
-    ${t === "M" ? `<div class="sum"><span>예산 제출(기한 ${dueOf(P.cur[0])})</span><b style="font-size:13px">${(() => { const d = D().B[P.cur[0]]; return d && d.submittedAt ? `${esc(d.submittedAt)}${d.submittedAt > dueOf(P.cur[0]) ? " 지연" : " 기한 내"}` : "미제출"; })()}</b></div>` : ""}
+    ${t === "M" ? `<div class="sum"><span>예산 진행(제출 기한 ${dueOf(P.cur[0])})</span><b style="font-size:13px">${(() => { const d = D().B[P.cur[0]]; return esc(bStateLabel(S.cfg, d)) + (d && d.submittedAt && BST.indexOf(bState(d)) >= 2 ? (d.submittedAt > dueOf(P.cur[0]) ? " (지연 제출)" : " (기한 내 제출)") : ""); })()}</b></div>` : ""}
   </div>
   <div class="tbl tall"><table class="sil"><thead><tr><th style="text-align:left;position:sticky;left:0;z-index:3">항목</th>${cols.map(c => `<th class="num">${c[0]}</th>`).join("")}<th>점검</th>${t === "M" ? "<th>차이사유</th>" : ""}</tr></thead>
   <tbody>${ROWS.map(([lb, kind, ind, , nat]) => { const f = flagOf(nat, bv[lb], av[lb], thr); return `<tr class="${TOTALS.has(lb) ? "total" : kind === "sum" ? "subt" : kind === "ratio" ? "ratio" : "leaf"}${U.an.sel === lb ? " sel" : ""}"><td class="lb ind${ind}" ${kind === "leaf" ? `data-sel="${esc(lb)}" title="눌러서 세부 내역 보기"` : ""}>${esc(lb)}</td>${cols.map(c => `<td class="num">${c[1] ? fmtv(c[1][lb], kind) : (() => { const v = c[2](lb, o); if (kind === "ratio") return c[3] ? "" : ppt(v); return c[3] ? pct(v, true) : money(v); })()}</td>`).join("")}<td>${flagChip(f)}</td>${t === "M" ? `<td class="wrap">${kind === "leaf" ? (can ? `<input type="text" data-rs="${esc(lb)}" value="${esc((reasons[lb] || {}).reason || "")}" placeholder="${f ? "사유 입력" : ""}" aria-label="${esc(lb)} 차이사유" style="width:100%">` : esc((reasons[lb] || {}).reason || "")) : ""}</td>` : ""}</tr>`; }).join("")}</tbody></table></div>
@@ -1651,7 +1853,7 @@ function aiContext(t, y, k) {
   s += `\n[담당자가 입력한 차이사유]\n${rs.join("\n") || "없음"}\n`;
   const lst = ms.reduce((x, m) => { const q = A.lst[m] || {}; x.unc += q.unc || 0; x.uncAmt += q.uncAmt || 0; return x; }, { unc: 0, uncAmt: 0 });
   const bst = ms.reduce((x, m) => { const q = A.bst[m] || {}; x.unc += q.unc || 0; return x; }, { unc: 0 });
-  const sub = ms.map(m => { const b = d.B[m]; return `${m} ${b && b.submittedAt ? "제출 " + b.submittedAt + (b.submittedAt > dueOf(m) ? "(기한 " + dueOf(m) + " 지남)" : "") : "미제출"}`; }).join(", ");
+  const sub = ms.map(m => { const b = d.B[m]; return `${m} ${bStateLabel(S.cfg, b)}${b && b.submittedAt && BST.indexOf(bState(b)) >= 2 ? " 제출 " + b.submittedAt + (b.submittedAt > dueOf(m) ? "(기한 " + dueOf(m) + " 지남)" : "") : ""}`; }).join(", ");
   s += `\n[데이터 상태] 원장 미분류 ${lst.unc}줄 ${w(lst.uncAmt)}원, 예산 미분류 ${bst.unc}줄, 예산 제출: ${sub}, 원장 업로드 월: ${ms.filter(m => d.L[m]).join(", ") || "없음"}, 매출 입력 월: ${ms.filter(m => d.A[m]).join(", ") || "없음"}\n[점검 기준] 차이 ${thr.amt}원 이상이면서 ${Math.round(thr.rate * 100)}% 이상`;
   return { text: s, label: lab, key: `${t}-${t === "M" ? ym(y, k) : t === "Q" ? y + "-Q" + k : y + "-1~" + k}` };
 }
@@ -1748,7 +1950,7 @@ function renderAI(el) {
 const RLB = { a: "더존 계정", p: "적요 포함 문구", i: "실적표 항목", note: "비고", "0": "더존 계정", "1": "표준 적요" };
 function renderRules(el) {
   const c = S.cfg, ed = U.rulesEdit, admin = S.isAdmin && db && !S.demo;
-  const src = ed || { acct: clone(c.acct), rules: clone(c.rules), std: clone(c.std), thr: clone(c.thr), center: c.center };
+  const src = ed || { acct: clone(c.acct), rules: clone(c.rules), std: clone(c.std), thr: clone(c.thr), center: c.center, flow: clone(c.flow), fund: clone(c.fund) };
   const inp = (k, i, f, v, w) => ed ? `<input type="text" data-k="${k}" data-i="${i}" data-f="${f}" value="${esc(v)}" style="width:${w || "100%"}" aria-label="${RLB[f] || f}">` : esc(v);
   const isel = (k, i, f, v) => ed ? `<select data-k="${k}" data-i="${i}" data-f="${f}" aria-label="${RLB[f] || f}">${itemOptions(v, "(없음)").replace('<option value="">(없음)</option>', `<option value="">(없음)</option><option${v === "제외" ? " selected" : ""}>제외</option>`)}</select>` : esc(v);
   el.innerHTML = `
@@ -1777,19 +1979,28 @@ function renderRules(el) {
       </tbody></table></div>
       <div class="note">차이 금액과 차이율 기준을 모두 넘으면 분석 화면 점검란에 표시함. 비용센터가 다른 원장 행은 올릴 때 뺄 수 있음</div></div>
   </div>
+  <div class="grid2">
+    <div class="panel"><span class="cap">6 결재선 (예산 승인 순서)</span>
+      <div class="tbl"><table><thead><tr><th>단계</th><th>직함</th><th>이름</th><th>로그인 ID(이메일)</th></tr></thead><tbody>${[["author", "작성"], ["a1", "1차 승인"], ["a2", "2차 승인"], ["fund", "운영 통장 입금"]].map(([k, lb]) => `<tr><td>${lb}</td>${["title", "name", "id"].map(ff => `<td>${ed ? `<input type="text" data-fl="${k}" data-ff="${ff}" value="${esc(src.flow[k][ff] || "")}" aria-label="${lb} ${FLB[ff]}">` : esc(src.flow[k][ff] || "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      ${ed ? `<label><input type="checkbox" id="flowMailOk" ${src.flow.mailOk ? "checked" : ""}> 메일로 받은 승인을 다른 사람이 대신 기록할 수 있음</label>` : `<div>메일로 받은 승인을 다른 사람이 대신 기록: ${src.flow.mailOk ? "허용" : "허용 안 함"}</div>`}
+      <div class="note">로그인 ID를 넣으면 그 사람이 로그인해 직접 승인할 수 있음. 비워 두면 메일로 승인을 받아 기록하는 방식으로 씀. 직함과 이름은 승인 요청서와 메일 문안에 쓰임</div></div>
+    <div class="panel"><span class="cap">7 운영 통장 입금 요청에서 빼는 항목</span>
+      ${ed ? `<div class="tbl tall"><table><thead><tr><th>실적표 항목</th><th>구분</th><th>입금 구분</th></tr></thead><tbody>${ITEMS.filter(i => i.g === "고정비" || i.g === "변동비").map(i => `<tr><td>${esc(i.n)}</td><td>${chip(i.g)}</td><td><select data-fd="${esc(i.n)}" aria-label="${esc(i.n)} 입금 구분"><option value="">입금 요청</option>${FUND_CLS.map(x => `<option${src.fund[i.n] === x ? " selected" : ""}>${x}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>` : `<div class="tbl"><table><thead><tr><th>입금 구분</th><th>항목</th></tr></thead><tbody>${FUND_CLS.map(x => `<tr><td>${x}</td><td class="wrap">${esc(LEAVES.filter(i => src.fund[i] === x).join(", ") || "없음")}</td></tr>`).join("")}</tbody></table></div>`}
+      <div class="note">입금 요청액 = 지출 예산(고정비 + 변동비) - 인건비 - 임차료 - 기타 제외. 인건비와 임차료는 관리 통장에서 직접 지급하고, 기타 제외는 감가상각비처럼 돈이 나가지 않는 항목임</div></div>
+  </div>
   ${window.BDB_EXT && window.BDB_EXT.rulesHtml ? window.BDB_EXT.rulesHtml({ admin: S.isAdmin && !S.demo, esc }) : ""}`;
   if (window.BDB_EXT && window.BDB_EXT.bindRules) window.BDB_EXT.bindRules(el, { render, toast, esc, cfgEmpty: !S.cfg.acct.length });
   if (!admin) return;
-  if ($("#rEdit")) $("#rEdit").onclick = () => { U.rulesEdit = { acct: clone(c.acct), rules: clone(c.rules), std: clone(c.std), thr: clone(c.thr), center: c.center }; render(); };
+  if ($("#rEdit")) $("#rEdit").onclick = () => { U.rulesEdit = { acct: clone(c.acct), rules: clone(c.rules), std: clone(c.std), thr: clone(c.thr), center: c.center, flow: clone(c.flow), fund: clone(c.fund) }; render(); };
   if (!ed) return;
   $("#rCancel").onclick = () => { U.rulesEdit = null; render(); };
-  el.oninput = e => { const t = e.target; if (!t.dataset.k) return; const row = ed[t.dataset.k][Number(t.dataset.i)]; row[t.dataset.f] = t.value; };
-  el.onchange = e => { const t = e.target; if (t.dataset.k && t.tagName === "SELECT") { ed[t.dataset.k][Number(t.dataset.i)][t.dataset.f] = t.value; } };
+  el.oninput = e => { const t = e.target; if (t.dataset.fl) { ed.flow[t.dataset.fl][t.dataset.ff] = t.value; return; } if (!t.dataset.k) return; const row = ed[t.dataset.k][Number(t.dataset.i)]; row[t.dataset.f] = t.value; };
+  el.onchange = e => { const t = e.target; if (t.dataset.k && t.tagName === "SELECT") { ed[t.dataset.k][Number(t.dataset.i)][t.dataset.f] = t.value; } if (t.dataset.fd !== undefined && t.tagName === "SELECT") { if (t.value) ed.fund[t.dataset.fd] = t.value; else delete ed.fund[t.dataset.fd]; } if (t.id === "flowMailOk") ed.flow.mailOk = t.checked; };
   el.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { ed[b.dataset.del].splice(Number(b.dataset.i), 1); render(); });
   el.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { const k = b.dataset.add; ed[k].push(k === "acct" ? { a: "", i: "", note: "" } : k === "rules" ? { a: "", p: "", i: "" } : ["", ""]); render(); });
   $("#rSave").onclick = async () => {
     if (S.demo || !db) return;
-    const body = { acct: ed.acct.filter(a => a.a), rules: ed.rules.filter(r => r.a && r.p && r.i), std: ed.std.filter(s => s[0] && s[1]).map(s => ({ a: s[0], t: s[1] })), thr: (() => { const ta = $("#thrAmt").value.trim(), tr = $("#thrRate").value.trim(); return { amt: ta !== "" && isFinite(Number(ta)) && Number(ta) >= 0 ? Number(ta) : 500000, rate: tr !== "" && isFinite(Number(tr)) && Number(tr) >= 0 ? Number(tr) / 100 : 0.1 }; })(), center: $("#cfgCenter").value.trim(), updatedBy: S.uid || null, updatedAt: new Date().toISOString() };
+    const body = { acct: ed.acct.filter(a => a.a), rules: ed.rules.filter(r => r.a && r.p && r.i), std: ed.std.filter(s => s[0] && s[1]).map(s => ({ a: s[0], t: s[1] })), thr: (() => { const ta = $("#thrAmt").value.trim(), tr = $("#thrRate").value.trim(); return { amt: ta !== "" && isFinite(Number(ta)) && Number(ta) >= 0 ? Number(ta) : 500000, rate: tr !== "" && isFinite(Number(tr)) && Number(tr) >= 0 ? Number(tr) / 100 : 0.1 }; })(), center: $("#cfgCenter").value.trim(), flow: flowBody(ed.flow), fund: fundBody(ed.fund), updatedBy: S.uid || null, updatedAt: new Date().toISOString() };
     const ref = db.doc("config/main");
     try { await queueWrite(ref.path, () => ref.set(body)); U.rulesEdit = null; toast("기준정보를 저장함. 예산과 실적 분류에 바로 반영됨"); render(); } catch (e) { toast(dbErr(e)); }
   };
@@ -1814,9 +2025,7 @@ async function saveXlsx(wb, name) {
 }
 function exportBudget(bd) {
   if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
-  const rows = [["연월", "더존 계정", "적요", "구분", "실적표 항목", "수량", "단가", "직접입력 금액", "예산금액", "산출근거", "항목 직접지정"]];
-  bd.lines.forEach(l => { const c = classify(S.cfg, l.acct, l.memo, l.ovr); rows.push([bd.ym, l.acct, l.memo, groupOf(c.item), c.item, hasVal(l.qty) ? num(l.qty) : "", hasVal(l.price) ? num(l.price) : "", hasVal(l.direct) ? num(l.direct) : "", budgetAmt(l), l.basis || "", l.ovr || ""]); });
-  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "예산입력"); saveXlsx(wb, `부산대성_예산_${bd.ym}`);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(budgetRows(bd)), "예산입력"); saveXlsx(wb, `부산대성_예산_${bd.ym}`);
 }
 function exportReport(y, a, b, p, tA, tB, tP) {
   if (!window.XLSX) { toast("엑셀 도구를 불러오지 못함"); return; }
@@ -1864,7 +2073,7 @@ function makeDemo(cfg) {
     if (yy === cy) {
       const lines = [];
       for (const it of LEAVES) { const v = amt(it, mi, g) * (0.92 + rnd() * 0.16); const ss = byItem[it] || []; if (!ss.length || !v) continue; const s = ss[0]; lines.push({ id: uidStr(), acct: s.a, memo: s.t, qty: "", price: "", direct: String(Math.round(v / 1000) * 1000), basis: "예시 금액", ovr: "" }); }
-      B[k] = { ym: k, lines, rev: 1, submittedAt: ymAdd(k, -1) + "-1" + Math.floor(rnd() * 6) };
+      B[k] = { ym: k, lines, rev: 1, submittedAt: ymAdd(k, -1) + "-1" + Math.floor(rnd() * 6), st: "fund" };
     }
   }
   return { B, L, A, R: {}, AI: {} };

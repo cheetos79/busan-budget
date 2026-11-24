@@ -98,18 +98,18 @@
       const mem = Object.entries(EXT.members).sort((a, b) => a[0].localeCompare(b[0]));
       return `
       <div class="grid2">
-        <div class="panel"><span class="cap">6 AI 설정 (이 브라우저 전용)</span>
+        <div class="panel"><span class="cap">8 AI 설정 (이 브라우저 전용)</span>
           <div class="note">AI 분석은 Claude API(${MODEL})로 실행함. 키는 서버에 저장하지 않고 이 브라우저에만 보관함. 사용 요금은 키를 발급한 계정에 청구됨</div>
           <div class="toolbar"><label class="sr" for="bdbKey">Claude API 키</label><input type="password" id="bdbKey" placeholder="${key ? "저장된 키 있음 (바꾸려면 새로 입력)" : "sk-ant-로 시작하는 키"}" autocomplete="off" style="flex:1 1 240px">
           <button class="btn pri" id="bdbKeySave">키 저장</button>${key ? `<button class="btn" id="bdbKeyDel">키 삭제</button>` : ""}</div></div>
-        ${admin ? `<div class="panel"><span class="cap">7 구성원 관리 (관리자)</span>
+        ${admin ? `<div class="panel"><span class="cap">9 구성원 관리 (관리자)</span>
           <div class="note">등록된 이메일로 로그인한 사람만 자료를 볼 수 있음. admin: 기준정보와 구성원 관리, editor: 예산과 실적 입력, viewer: 보기만</div>
           <div class="tbl"><table><thead><tr><th>이메일</th><th>이름</th><th>역할</th><th></th></tr></thead><tbody>
           ${mem.map(([em, m]) => `<tr><td>${esc(em)}</td><td>${esc(m.name || "")}</td><td><select data-role="${esc(em)}" aria-label="${esc(em)} 역할">${["admin", "editor", "viewer"].map(r => `<option${m.role === r ? " selected" : ""}>${r}</option>`).join("")}</select></td><td>${em === (EXT.me || "") ? "" : `<button class="btn sm" data-mdel="${esc(em)}">삭제</button>`}</td></tr>`).join("")}
           </tbody></table></div>
           <form class="toolbar" id="bdbMemForm"><label class="sr" for="bdbMemEmail">이메일</label><input type="text" id="bdbMemEmail" placeholder="이메일" style="flex:1 1 180px"><label class="sr" for="bdbMemName">이름</label><input type="text" id="bdbMemName" placeholder="이름" style="width:110px"><label class="sr" for="bdbMemRole">역할</label><select id="bdbMemRole"><option>editor</option><option>viewer</option><option>admin</option></select><button class="btn pri">구성원 추가</button></form></div>` : ""}
       </div>
-      ${admin ? `<div class="panel"><span class="cap">8 기준정보 가져오기 (관리자)</span>
+      ${admin ? `<div class="panel"><span class="cap">10 기준정보 가져오기 (관리자)</span>
         <div class="note">공개 저장소에는 계정 매핑과 적요 규칙을 넣지 않았음. 경영기획실이 보관한 '기준정보_초기값.json' 파일을 골라 한 번 올리면 모든 구성원에게 적용됨</div>
         <div class="toolbar"><label class="btn" for="bdbCfgFile">JSON 파일 고르기</label><input type="file" id="bdbCfgFile" accept=".json,application/json" class="sr"></div></div>` : ""}`;
     },
@@ -131,7 +131,10 @@
           const j = JSON.parse(await f.text());
           const ok = Array.isArray(j.acct) && Array.isArray(j.rules) && Array.isArray(j.std) && j.acct.every(a => a && typeof a.a === "string") && j.rules.every(r => r && typeof r.a === "string" && typeof r.p === "string" && typeof r.i === "string") && j.std.every(s => Array.isArray(s) && s.length === 2);
           if (!ok) { ctx.toast("기준정보 파일 형식이 아님(acct, rules, std 필요)"); return; }
+          const old = await fs.doc("config/main").get().then(d => (d.exists ? d.data() : {})).catch(() => ({}));
           const body = { acct: j.acct, rules: j.rules, std: j.std.map(s => ({ a: s[0], t: s[1] })), thr: j.thr || { amt: 500000, rate: 0.1 }, center: String(j.center || ""), updatedBy: EXT.me, updatedAt: new Date().toISOString() };
+          // 결재선과 입금 요청 제외 항목은 파일에 있으면 그 값을, 없으면 지금 저장된 값을 그대로 둠
+          const flow = j.flow || old.flow, fund = j.fund || old.fund; if (flow) body.flow = flow; if (fund) body.fund = fund;
           await fs.doc("config/main").set(body); ctx.toast(`기준정보를 올림. 계정 ${body.acct.length}개, 규칙 ${body.rules.length}개, 표준 적요 ${body.std.length}줄`);
         } catch (x) { ctx.toast("파일을 읽거나 저장하지 못함"); }
       };
