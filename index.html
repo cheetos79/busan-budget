@@ -134,6 +134,56 @@ table.grid td.auto { background: var(--auto); }
 table.grid input:disabled, table.grid select:disabled { background: transparent; color: var(--fg); }
 .w-acct { min-width: 140px; } .w-memo { min-width: 200px; } .w-basis { min-width: 170px; } .w-item { min-width: 120px; }
 
+/* 예산 입력 표: 가로·세로 스크롤 없이 화면 폭에 맞춤. 좁은 화면에서는 한 줄을 카드 하나로 바꿈 */
+:root { --bar-h: 0px; --tb-h: 0px; }
+#view-budget { container: bud / inline-size; }
+.toolbar.stick { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--bar-h)); z-index: 5; background: var(--bg); padding-block: 8px; margin-block: -8px; }
+.tbl.fit { overflow: visible; }
+table.bud { table-layout: fixed; }
+table.bud th { top: calc(env(safe-area-inset-top, 0px) + var(--bar-h) + var(--tb-h)); white-space: normal; word-break: keep-all; padding: 7px 4px; line-height: 1.3; }
+table.bud input, table.bud select, table.bud input.num { min-width: 0; }
+table.bud input, table.bud select, table.bud button { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + var(--bar-h) + var(--tb-h) + 44px); scroll-margin-bottom: 12px; }
+table.bud td.auto { overflow: hidden; text-overflow: ellipsis; }
+table.bud td[data-c="item"] { white-space: normal; word-break: keep-all; overflow-wrap: anywhere; line-height: 1.3; }
+table.bud td[data-c="g"], table.bud td[data-c="del"] { text-align: center; padding-inline: 2px; }
+table.bud td[data-c="del"] .btn { padding-inline: 6px; }
+@media (max-height: 560px) { .toolbar.stick { position: static; } }
+@container bud (max-width: 1199px) {
+  table.bud { font-size: 12px; }
+  table.bud td { padding: 3px 2px; }
+  table.bud input, table.bud select { padding: 5px 4px; font-size: 12px; }
+  table.bud .chip { padding: 1px 4px; font-size: 11px; }
+}
+@container bud (max-width: 1039px) {
+  .toolbar.stick { position: static; }
+  table.bud, table.bud tbody { display: block; }
+  table.bud thead, table.bud colgroup { display: none; }
+  table.bud { font-size: 13px; }
+  table.bud tr { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px 8px; align-items: start; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  table.bud tbody tr:hover td { background-color: transparent; }
+  table.bud td { display: block; border: 0; padding: 0; white-space: normal; min-width: 0; text-align: left; }
+  table.bud td[data-l]::before { content: attr(data-l); display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; text-align: left; }
+  table.bud input, table.bud select { padding: 6px 8px; font-size: 13px; }
+  table.bud .chip { padding: 1px 7px; font-size: 11.5px; }
+  table.bud td.auto { background: transparent; overflow: visible; }
+  table.bud td[data-c="no"] { order: -4; grid-column: span 1; align-self: center; font-weight: 700; }
+  table.bud td[data-c="g"] { order: -3; grid-column: span 3; align-self: center; text-align: left; padding: 0; }
+  table.bud td[data-c="item"] { order: -2; grid-column: span 6; align-self: center; font-weight: 700; }
+  table.bud td[data-c="del"] { order: -1; grid-column: span 2; text-align: right; padding: 0; }
+  table.bud td[data-c="acct"] { grid-column: span 5; }
+  table.bud td[data-c="memo"] { grid-column: span 7; }
+  table.bud td[data-c="qty"] { grid-column: span 2; }
+  table.bud td[data-c="price"], table.bud td[data-c="direct"] { grid-column: span 3; }
+  table.bud td[data-c="amt"] { grid-column: span 4; font-weight: 700; }
+  table.bud td[data-c="amt"]::before { font-weight: 400; }
+  table.bud td[data-c="basis"] { grid-column: span 7; }
+  table.bud td[data-c="ovr"] { grid-column: span 5; }
+}
+@container bud (max-width: 559px) {
+  table.bud td[data-c="acct"], table.bud td[data-c="memo"], table.bud td[data-c="amt"], table.bud td[data-c="basis"], table.bud td[data-c="ovr"] { grid-column: 1 / -1; }
+  table.bud td[data-c="qty"], table.bud td[data-c="price"], table.bud td[data-c="direct"] { grid-column: span 4; }
+}
+
 .chip { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 3px; white-space: nowrap; }
 .g-매출 { background: var(--rev); color: var(--rev-fg); }
 .g-고정비 { background: var(--fix); color: var(--fix-fg); }
@@ -552,8 +602,14 @@ function render() {
   const fn = { dashboard: renderDashboard, budget: renderBudget, actual: renderActual, report: renderReport, analysis: renderAnalysis, ai: renderAI, rules: renderRules }[U.view];
   try { fn($("#view-" + U.view)); } catch (e) { console.error(e); $("#view-" + U.view).innerHTML = `<div class="banner bad">화면을 그리는 중 오류가 남. 새로고침해도 같으면 경영기획실에 알림</div>`; }
   fillNames();
+  watchStick();
   if (window.BDB_EXT && window.BDB_EXT.afterRender) { try { window.BDB_EXT.afterRender(U.view); } catch (e) { console.error(e); } }
 }
+// 상단 메뉴와 예산 입력 도구 줄의 높이를 CSS 변수로 넘김. 예산 표 머리글이 그 바로 아래에 붙음
+function setStick() { const r = document.documentElement.style, b = document.querySelector(".bar"), t = document.querySelector("#view-budget:not([hidden]) .toolbar.stick"); r.setProperty("--bar-h", (b ? b.offsetHeight : 0) + "px"); r.setProperty("--tb-h", (t && getComputedStyle(t).position === "sticky" ? t.offsetHeight : 0) + "px"); }
+const stickRO = window.ResizeObserver ? new ResizeObserver(() => setStick()) : null;
+function watchStick() { if (stickRO) { stickRO.disconnect(); [".bar", "#view-budget:not([hidden]) .toolbar.stick"].forEach(s => { const e = document.querySelector(s); if (e) stickRO.observe(e); }); } setStick(); }
+window.addEventListener("resize", setStick);
 function renderDemoBar() {
   const el = $("#demoBar");
   if (S.demo) { el.hidden = false; el.className = "banner"; el.innerHTML = `<b>예시 데이터 표시 중</b><span>실제 데이터가 아니며 저장되지 않음. 입력, 저장 기능은 꺼져 있음</span><button class="btn sm" id="demoOff">예시 끄기</button>`; $("#demoOff").onclick = () => { S.demo = false; resetDrafts(); changed(); }; return; }
@@ -741,7 +797,7 @@ function renderBudget(el) {
   ${sm.noAcct ? `<div class="banner bad"><span>더존 계정 없이 항목만 고른 줄 ${sm.noAcct}개(${won(sm.noAcctAmt)}원)는 엑셀 양식과 같이 실적표 예산에 들어가지 않음. 계정을 채워야 함</span></div>` : ""}
   ${flowPanel(bd, doc)}
   ${locked && writable() ? `<div class="banner info"><span>제출한 예산이라 고칠 수 없음. 고치려면 위의 '회수하여 수정'을 누름</span></div>` : ""}
-  <div class="toolbar">
+  <div class="toolbar stick">
     <button class="btn" id="bAdd" ${can ? "" : "disabled"}>줄 추가</button>
     <button class="btn" id="bStd" ${can ? "" : "disabled"}>기본 목록 불러오기</button>
     <button class="btn" id="bCopy" ${can ? "" : "disabled"}>전월 예산 복사</button>
@@ -755,7 +811,7 @@ function renderBudget(el) {
   </div>
   ${!writable() && !S.demo ? `<div class="note">${S.conn === "off" ? "공유 저장소에 연결되지 않아 읽기만 가능함" : "이 공유 링크는 읽기 전용임. 입력하려면 소유자에게 참여자 이상 권한을 요청함"}</div>` : ""}
   ${U.bimp ? budgetImportPreview(U.bimp) : ""}
-  ${bd.lines.length ? `<div class="tbl tall"><table class="grid"><thead><tr><th>#</th><th>더존 계정</th><th>적요</th><th>구분</th><th>실적표 항목</th><th class="num">수량</th><th class="num">단가</th><th class="num">직접입력 금액</th><th class="num">예산금액</th><th>산출근거</th><th>항목 직접지정</th><th></th></tr></thead>
+  ${bd.lines.length ? `<div class="tbl fit"><table class="grid bud"><colgroup><col style="width:2.6%"><col style="width:11.6%"><col style="width:15.6%"><col style="width:5.4%"><col style="width:10%"><col style="width:5.4%"><col style="width:7.4%"><col style="width:8.2%"><col style="width:7.8%"><col style="width:13.2%"><col style="width:8.6%"><col style="width:4.2%"></colgroup><thead><tr><th>#</th><th>더존 계정</th><th>적요</th><th>구분</th><th>실적표 항목</th><th class="num">수량</th><th class="num">단가</th><th class="num">직접입력 금액</th><th class="num">예산금액</th><th>산출근거</th><th>항목 직접지정</th><th></th></tr></thead>
   <tbody id="bBody">${shown.map(([l, i]) => bRow(l, i, can)).join("")}</tbody></table></div>` : `<div class="empty">${ymLabel(bd.ym)} 예산이 아직 없음. '기본 목록 불러오기'로 표준 적요 ${S.cfg.std.length}줄을 넣거나 '전월 예산 복사'로 시작함</div>`}
   <div class="note">색칠된 입력 칸만 수정함. 구분, 실적표 항목, 예산금액은 자동임. 예산금액 = 수량 x 단가, 직접입력 금액이 있으면 그 금액이 우선함. 매출 차감 항목은 음수로 입력함. 작성: ${doc ? `${who(doc.updatedBy)} ${when(doc.updatedAt)}` : "-"}</div>`;
   const go = k => { if (U.bd.dirty) { toast("저장하지 않은 변경이 있어 이동하지 않음. 먼저 저장함"); render(); return; } U.bym = k; U.bd = null; render(); };
@@ -781,17 +837,17 @@ function renderBudget(el) {
 function sortKey(acct, memo, ovr) { const it = classify(S.cfg, acct, memo, ovr).item; const g = GORD[groupOf(it)] ?? 9; const li = LEAVES.indexOf(it); return `${g}|${String(li < 0 ? 99 : li).padStart(2, "0")}|${acct || "~"}`; }
 function bRow(l, i, can) {
   const c = classify(S.cfg, l.acct, l.memo, l.ovr), dis = can ? "" : "disabled";
-  return `<tr data-i="${i}"><td class="num muted">${i + 1}</td>
-  <td><select class="w-acct" data-f="acct" ${dis} aria-label="더존 계정">${acctOptions(l.acct)}</select></td>
-  <td><input class="w-memo" data-f="memo" list="${dlId(l.acct)}" value="${esc(l.memo)}" ${dis} aria-label="적요" autocomplete="off"></td>
-  <td class="auto" data-o="g">${chip(groupOf(c.item))}</td><td class="auto" data-o="item">${esc(c.item)}</td>
-  <td><input class="num" data-f="qty" inputmode="decimal" value="${esc(l.qty)}" ${dis} aria-label="수량"></td>
-  <td><input class="num" data-f="price" inputmode="numeric" value="${esc(l.price)}" ${dis} aria-label="단가"></td>
-  <td><input class="num" data-f="direct" inputmode="numeric" value="${esc(l.direct)}" ${dis} aria-label="직접입력 금액"></td>
-  <td class="auto num" data-o="amt">${won(budgetAmt(l))}</td>
-  <td><input class="w-basis" data-f="basis" value="${esc(l.basis)}" ${dis} aria-label="산출근거"></td>
-  <td><select class="w-item" data-f="ovr" ${dis} aria-label="항목 직접지정">${itemOptions(l.ovr)}</select></td>
-  <td>${can ? `<button class="btn sm" data-act="del">삭제</button>` : ""}</td></tr>`;
+  return `<tr data-i="${i}"><td class="num muted" data-c="no">${i + 1}</td>
+  <td data-c="acct" data-l="더존 계정"><select class="w-acct" data-f="acct" ${dis} aria-label="더존 계정">${acctOptions(l.acct)}</select></td>
+  <td data-c="memo" data-l="적요"><input class="w-memo" data-f="memo" list="${dlId(l.acct)}" value="${esc(l.memo)}" ${dis} aria-label="적요" autocomplete="off"></td>
+  <td class="auto" data-c="g" data-o="g">${chip(groupOf(c.item))}</td><td class="auto" data-c="item" data-o="item">${esc(c.item)}</td>
+  <td data-c="qty" data-l="수량"><input class="num" data-f="qty" inputmode="decimal" value="${esc(l.qty)}" ${dis} aria-label="수량"></td>
+  <td data-c="price" data-l="단가"><input class="num" data-f="price" inputmode="numeric" value="${esc(l.price)}" ${dis} aria-label="단가"></td>
+  <td data-c="direct" data-l="직접입력 금액"><input class="num" data-f="direct" inputmode="numeric" value="${esc(l.direct)}" ${dis} aria-label="직접입력 금액"></td>
+  <td class="auto num" data-c="amt" data-l="예산금액" data-o="amt">${won(budgetAmt(l))}</td>
+  <td data-c="basis" data-l="산출근거"><input class="w-basis" data-f="basis" value="${esc(l.basis)}" ${dis} aria-label="산출근거"></td>
+  <td data-c="ovr" data-l="항목 직접지정"><select class="w-item" data-f="ovr" ${dis} aria-label="항목 직접지정">${itemOptions(l.ovr)}</select></td>
+  <td data-c="del">${can ? `<button class="btn sm" data-act="del">삭제</button>` : ""}</td></tr>`;
 }
 function refreshRow(tr, l) { const c = classify(S.cfg, l.acct, l.memo, l.ovr); tr.querySelector('[data-o="g"]').innerHTML = chip(groupOf(c.item)); tr.querySelector('[data-o="item"]').textContent = c.item; tr.querySelector('[data-o="amt"]').textContent = won(budgetAmt(l)); }
 function refreshSummary() { const sm = budgetSummary(U.bd.lines); const bs = document.querySelectorAll("#view-budget .sum b"); const v = [won(sm.매출), won(sm.고정비), won(sm.변동비), won(sm.이익조정), won(sm.op)]; v.forEach((t, i) => { if (bs[i]) bs[i].textContent = t; }); if (bs[5]) bs[5].innerHTML = `${sm.n}줄 / <span class="${sm.unc ? "neg" : ""}">${sm.unc}</span>`; const fr = $("#fundReq"); if (fr) { const fc = fundCalc(S.cfg, U.bd.lines); fr.textContent = wonTxt(fc.req); const fn2 = $("#fundNote"); if (fn2) fn2.textContent = fundNoteTxt(fc); } }
