@@ -184,6 +184,72 @@ table.bud td[data-c="del"] .btn { padding-inline: 6px; }
   table.bud td[data-c="qty"], table.bud td[data-c="price"], table.bud td[data-c="direct"] { grid-column: span 4; }
 }
 
+/* 실적 입력 표: 예산 입력 표와 같은 방식으로 화면 폭에 맞춤. 원장 내역은 좁으면 줄마다 카드로, 원장 외 실적도 같음 */
+#view-actual { container: act / inline-size; }
+.panel-h.stick { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--bar-h)); z-index: 5; background: var(--surface); padding-block: 8px; margin-block: -8px; align-items: center; }
+.panel-h .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#adjPanel { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + var(--bar-h) + 12px); }
+table.led, table.adj { table-layout: fixed; }
+table.led th, table.adj th { white-space: normal; word-break: keep-all; padding: 7px 4px; line-height: 1.3; }
+table.led th { top: calc(env(safe-area-inset-top, 0px) + var(--bar-h) + var(--tb-h)); }
+table.adj th { top: calc(env(safe-area-inset-top, 0px) + var(--bar-h)); }
+table.led td { white-space: normal; word-break: keep-all; overflow-wrap: anywhere; line-height: 1.35; }
+table.led td.wrap { min-width: 0; }
+table.led td[data-c="d"], table.led td[data-c="amt"] { white-space: nowrap; }
+table.led td[data-c="g"], table.adj td[data-c="g"], table.adj td[data-c="del"] { text-align: center; padding-inline: 2px; }
+table.led select, table.adj input, table.adj select, table.adj input.num { min-width: 0; }
+table.led select { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + var(--bar-h) + var(--tb-h) + 44px); scroll-margin-bottom: 12px; }
+table.adj td.auto { overflow: hidden; }
+table.adj td[data-c="del"] .btn { padding-inline: 6px; }
+@media (max-height: 560px) { .panel-h.stick { position: static; } }
+@container act (max-width: 1199px) {
+  table.led, table.adj { font-size: 12px; }
+  table.led td { padding: 5px 4px; }
+  table.led .chip, table.adj .chip { padding: 1px 4px; font-size: 11px; }
+  table.led select { padding: 5px 4px; font-size: 12px; }
+}
+@container act (max-width: 939px) {
+  .panel-h.stick { position: static; }
+  table.led, table.led tbody { display: block; }
+  table.led thead, table.led colgroup { display: none; }
+  table.led { font-size: 13px; }
+  table.led tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  table.led tbody tr:hover td { background-color: transparent; }
+  table.led td { display: block; border: 0; padding: 0; min-width: 0; text-align: left; }
+  table.led td.auto { background: transparent; }
+  table.led td[data-c="g"] { padding: 0; }
+  table.led td[data-c="d"] { color: var(--muted); }
+  table.led td[data-c="a"] { font-weight: 700; }
+  table.led td[data-c="amt"] { margin-left: auto; font-weight: 700; }
+  table.led td[data-c="m"] { order: 1; flex: 1 1 100%; }
+  table.led td[data-c="g"], table.led td[data-c="item"], table.led td[data-c="why"] { order: 2; }
+  table.led td[data-c="ovr"] { order: 3; flex: 1 1 100%; }
+  table.led td[data-c="ovr"]::before { content: attr(data-l); display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  table.led .chip { padding: 1px 7px; font-size: 11.5px; }
+  table.led select { padding: 6px 8px; font-size: 13px; }
+}
+@container act (max-width: 719px) {
+  table.adj, table.adj tbody { display: block; }
+  table.adj thead, table.adj colgroup { display: none; }
+  table.adj { font-size: 13px; }
+  table.adj tr { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px 8px; align-items: start; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  table.adj tbody tr:hover td { background-color: transparent; }
+  table.adj td { display: block; border: 0; padding: 0; white-space: normal; min-width: 0; text-align: left; }
+  table.adj td[data-l]::before { content: attr(data-l); display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  table.adj td.auto { background: transparent; overflow: visible; }
+  table.adj td[data-c="item"] { order: -2; grid-column: span 9; }
+  table.adj td[data-c="del"] { order: -1; grid-column: span 3; text-align: right; padding: 0; align-self: end; }
+  table.adj td[data-c="g"] { grid-column: span 2; align-self: end; text-align: left; padding: 0 0 6px; }
+  table.adj td[data-c="amt"] { grid-column: span 4; }
+  table.adj td[data-c="src"], table.adj td[data-c="note"] { grid-column: span 3; }
+  table.adj .chip { padding: 1px 7px; font-size: 11.5px; }
+}
+@container act (max-width: 559px) {
+  table.adj td[data-c="g"] { grid-column: span 3; }
+  table.adj td[data-c="amt"] { grid-column: span 9; }
+  table.adj td[data-c="src"], table.adj td[data-c="note"] { grid-column: 1 / -1; }
+}
+
 .chip { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 3px; white-space: nowrap; }
 .g-매출 { background: var(--rev); color: var(--rev-fg); }
 .g-고정비 { background: var(--fix); color: var(--fix-fg); }
@@ -973,6 +1039,7 @@ table.bud td[data-c="del"] .btn { padding-inline: 6px; }
     ["#view-actual .seg [data-lf]", "원장 필터", "전체, 미분류, 제외, 직접지정한 줄만 골라 봄"],
     ['#view-actual [data-lf2="ovr"]', "항목 직접지정", "이 원장 줄의 실적표 항목을 직접 정함. 미분류 줄은 여기서 항목을 골라야 실적표에 들어감"],
     ["#lSave", "직접지정 저장", "원장 줄에 직접 지정한 항목을 저장함"],
+    ["#lJump", "3번 표로 이동", "아래쪽 '3 매출 및 원장 외 실적' 표로 화면을 내림. 원장 줄이 많을 때 씀"],
     ['#jBody [data-j="item"]', "실적표 항목", "매출이나 원장 외 실적이 들어갈 실적표 항목을 고름"],
     ['#jBody [data-j="amt"]', "금액(원)", "금액을 원 단위로 넣음. 차감 항목은 음수로 넣음"],
     ['#jBody [data-j="src"]', "근거 자료", "금액의 출처를 적음. 예: 손익계산서, 급여대장"],
@@ -1407,10 +1474,10 @@ function render() {
   watchStick();
   if (window.BDB_EXT && window.BDB_EXT.afterRender) { try { window.BDB_EXT.afterRender(U.view); } catch (e) { console.error(e); } }
 }
-// 상단 메뉴와 예산 입력 도구 줄의 높이를 CSS 변수로 넘김. 예산 표 머리글이 그 바로 아래에 붙음
-function setStick() { const r = document.documentElement.style, b = document.querySelector(".bar"), t = document.querySelector("#view-budget:not([hidden]) .toolbar.stick"); r.setProperty("--bar-h", (b ? b.offsetHeight : 0) + "px"); r.setProperty("--tb-h", (t && getComputedStyle(t).position === "sticky" ? t.offsetHeight : 0) + "px"); }
+// 상단 메뉴와 붙는 줄(예산 입력 도구 줄, 실적 입력 원장 머리 줄)의 높이를 CSS 변수로 넘김. 표 머리글이 그 바로 아래에 붙음
+function setStick() { const r = document.documentElement.style, b = document.querySelector(".bar"), t = document.querySelector(".view:not([hidden]) .stick"); r.setProperty("--bar-h", (b ? b.offsetHeight : 0) + "px"); r.setProperty("--tb-h", (t && getComputedStyle(t).position === "sticky" ? t.offsetHeight : 0) + "px"); }
 const stickRO = window.ResizeObserver ? new ResizeObserver(() => setStick()) : null;
-function watchStick() { if (stickRO) { stickRO.disconnect(); [".bar", "#view-budget:not([hidden]) .toolbar.stick"].forEach(s => { const e = document.querySelector(s); if (e) stickRO.observe(e); }); } setStick(); }
+function watchStick() { if (stickRO) { stickRO.disconnect(); [".bar", ".view:not([hidden]) .stick"].forEach(s => { const e = document.querySelector(s); if (e) stickRO.observe(e); }); } setStick(); }
 window.addEventListener("resize", setStick);
 function renderDemoBar() {
   const el = $("#demoBar");
@@ -2122,17 +2189,16 @@ function renderActual(el) {
     ${imp ? importPreview(imp) : ""}
   </div>
   <div class="panel">
-    <div class="panel-h"><span class="cap">2 ${ymLabel(k)} 원장 내역</span>
-      <span class="seg" role="group" aria-label="원장 필터">${["전체", "미분류", "제외", "직접지정"].map(g => `<button data-lf="${g}" aria-pressed="${U.lfilter === g}">${g}</button>`).join("")}</span></div>
-    ${U.led.lines.length ? `<div class="tbl tall"><table class="grid"><thead><tr><th>회계일자</th><th>계정명</th><th>적요</th><th class="num">금액</th><th>구분</th><th>실적표 항목</th><th>근거</th><th>항목 직접지정</th></tr></thead><tbody id="lBody">
-    ${lines.slice(0, 600).map(([l, i, c]) => `<tr data-i="${i}"><td>${esc(l.d)}</td><td>${esc(l.a)}</td><td class="wrap">${esc(l.m)}</td><td class="num">${won(ledgerAmt(l))}</td><td class="auto">${chip(groupOf(c.item))}</td><td class="auto">${esc(c.item)}</td><td class="auto muted">${esc(c.why)}${c.rule ? `(${esc(c.rule)})` : ""}</td><td><select data-lf2="ovr" ${can ? "" : "disabled"} aria-label="항목 직접지정">${itemOptions(l.ovr).replace('<option value="">자동</option>', '<option value="">자동</option><option' + (l.ovr === "제외" ? " selected" : "") + '>제외</option>')}</select></td></tr>`).join("")}
-    </tbody></table></div>${lines.length > 600 ? `<div class="note">600줄까지만 표시함</div>` : ""}
-    <div class="toolbar"><span class="sp"></span><button class="btn pri" id="lSave" ${can && U.led.dirty ? "" : "disabled"}>직접지정 저장</button></div>` : `<div class="empty">${ymLabel(k)} 원장이 아직 없음</div>`}
+    <div class="panel-h stick"><span class="cap">2 ${ymLabel(k)} 원장 내역</span>
+      <span class="acts"><span class="seg" role="group" aria-label="원장 필터">${["전체", "미분류", "제외", "직접지정"].map(g => `<button data-lf="${g}" aria-pressed="${U.lfilter === g}">${g}</button>`).join("")}</span>${U.led.lines.length ? `${lines.length > 12 ? `<button class="btn" id="lJump">3번 표로 이동</button>` : ""}<button class="btn pri" id="lSave" ${can && U.led.dirty ? "" : "disabled"}>직접지정 저장</button>` : ""}</span></div>
+    ${U.led.lines.length ? `<div class="tbl fit"><table class="grid led"><colgroup><col style="width:9%"><col style="width:13%"><col style="width:25.5%"><col style="width:9%"><col style="width:6.5%"><col style="width:11%"><col style="width:12%"><col style="width:14%"></colgroup><thead><tr><th>회계일자</th><th>계정명</th><th>적요</th><th class="num">금액</th><th>구분</th><th>실적표 항목</th><th>근거</th><th>항목 직접지정</th></tr></thead><tbody id="lBody">
+    ${lines.slice(0, 600).map(([l, i, c]) => `<tr data-i="${i}"><td data-c="d">${esc(l.d)}</td><td data-c="a">${esc(l.a)}</td><td class="wrap" data-c="m">${esc(l.m)}</td><td class="num" data-c="amt">${won(ledgerAmt(l))}</td><td class="auto" data-c="g">${chip(groupOf(c.item))}</td><td class="auto" data-c="item">${esc(c.item)}</td><td class="auto muted" data-c="why">${esc(c.why)}${c.rule ? `(${esc(c.rule)})` : ""}</td><td data-c="ovr" data-l="항목 직접지정"><select data-lf2="ovr" ${can ? "" : "disabled"} aria-label="항목 직접지정">${itemOptions(l.ovr).replace('<option value="">자동</option>', '<option value="">자동</option><option' + (l.ovr === "제외" ? " selected" : "") + '>제외</option>')}</select></td></tr>`).join("")}
+    </tbody></table></div>${lines.length > 600 ? `<div class="note">600줄까지만 표시함</div>` : ""}` : `<div class="empty">${ymLabel(k)} 원장이 아직 없음</div>`}
   </div>
-  <div class="panel">
+  <div class="panel" id="adjPanel">
     <div class="panel-h"><span class="cap">3 ${ymLabel(k)} 매출 및 원장 외 실적</span><span class="src">손익계산서 학원매출 분해, 4대보험, 퇴직충당금, 리스회계 인식, 이익조정 등. 차감은 음수</span></div>
-    <div class="tbl"><table class="grid"><thead><tr><th>실적표 항목</th><th>구분</th><th class="num">금액(원)</th><th>근거 자료</th><th>비고</th><th></th></tr></thead><tbody id="jBody">
-    ${U.adj.lines.map((l, i) => `<tr data-i="${i}"><td><select class="w-item" data-j="item" ${can ? "" : "disabled"} aria-label="실적표 항목">${itemOptions(l.item, "항목 선택")}</select></td><td class="auto">${chip(groupOf(l.item))}</td><td><input class="num" data-j="amt" inputmode="numeric" value="${esc(l.amt)}" ${can ? "" : "disabled"} aria-label="금액"></td><td><input data-j="src" value="${esc(l.src)}" ${can ? "" : "disabled"} aria-label="근거 자료"></td><td><input data-j="note" value="${esc(l.note)}" ${can ? "" : "disabled"} aria-label="비고"></td><td>${can ? `<button class="btn sm" data-jdel="1">삭제</button>` : ""}</td></tr>`).join("")}
+    <div class="tbl fit"><table class="grid adj"><colgroup><col style="width:22%"><col style="width:9%"><col style="width:17%"><col style="width:24%"><col style="width:21%"><col style="width:7%"></colgroup><thead><tr><th>실적표 항목</th><th>구분</th><th class="num">금액(원)</th><th>근거 자료</th><th>비고</th><th></th></tr></thead><tbody id="jBody">
+    ${U.adj.lines.map((l, i) => `<tr data-i="${i}"><td data-c="item" data-l="실적표 항목"><select class="w-item" data-j="item" ${can ? "" : "disabled"} aria-label="실적표 항목">${itemOptions(l.item, "항목 선택")}</select></td><td class="auto" data-c="g">${chip(groupOf(l.item))}</td><td data-c="amt" data-l="금액(원)"><input class="num" data-j="amt" inputmode="numeric" value="${esc(l.amt)}" ${can ? "" : "disabled"} aria-label="금액"></td><td data-c="src" data-l="근거 자료"><input data-j="src" value="${esc(l.src)}" ${can ? "" : "disabled"} aria-label="근거 자료"></td><td data-c="note" data-l="비고"><input data-j="note" value="${esc(l.note)}" ${can ? "" : "disabled"} aria-label="비고"></td><td data-c="del">${can ? `<button class="btn sm" data-jdel="1">삭제</button>` : ""}</td></tr>`).join("")}
     </tbody></table></div>
     <div class="toolbar"><button class="btn" id="jAdd" ${can ? "" : "disabled"}>줄 추가</button><span class="note">합계 매출 ${won(U.adj.lines.filter(l => groupOf(l.item) === "매출").reduce((s, l) => s + num(l.amt), 0))}원 | 원장 외 비용 ${won(U.adj.lines.filter(l => l.item && groupOf(l.item) !== "매출").reduce((s, l) => s + num(l.amt), 0))}원</span><span class="sp"></span><button class="btn pri" id="jSave" ${can && U.adj.dirty ? "" : "disabled"}>매출 및 원장 외 실적 저장</button></div>
     <div class="note">마지막 저장: ${adj ? `${who(adj.updatedBy)} ${when(adj.updatedAt)}` : "-"}</div>
@@ -2145,6 +2211,7 @@ function renderActual(el) {
   if (imp) bindImport();
   const lb = $("#lBody"); if (lb) lb.addEventListener("change", e => { const t = e.target; if (t.dataset.lf2 !== "ovr") return; const i = Number(t.closest("tr").dataset.i); U.led.lines[i].ovr = t.value; U.led.dirty = true; render(); });
   if ($("#lSave")) $("#lSave").onclick = async () => { if (!writable() || !U.led) return; const ref = db.doc("ledger/" + k); try { const fresh = await ref.get(); const fa = fresh.exists ? (fresh.data().updatedAt || "x") : ""; if (fa !== U.led.at) { toast("다른 사람이 이 달 원장을 새로 올렸음. 최신 내용으로 다시 불러왔으니 직접지정을 다시 함"); U.led = null; render(); return; } const body = { ...(fresh.exists ? fresh.data() : { ym: k }), lines: U.led.lines, updatedBy: S.uid || null, updatedAt: new Date().toISOString() }; if (tooBig(body)) { toast(TOO_BIG); return; } await queueWrite(ref.path, () => ref.set(body)); S.L = { ...S.L, [k]: body }; S.ver++; U.led.dirty = false; U.led.at = body.updatedAt; toast("직접지정을 저장함"); render(); } catch (x) { toast(dbErr(x)); } };
+  if ($("#lJump")) $("#lJump").onclick = () => $("#adjPanel").scrollIntoView({ block: "start" });
   const jb = $("#jBody");
   jb.addEventListener("input", e => { const t = e.target; if (!t.dataset.j) return; U.adj.lines[Number(t.closest("tr").dataset.i)][t.dataset.j] = t.value; U.adj.dirty = true; const sv = $("#jSave"); if (sv && writable()) sv.disabled = false; });
   jb.addEventListener("change", e => { const t = e.target; if (t.dataset.j === "item") { U.adj.lines[Number(t.closest("tr").dataset.i)].item = t.value; U.adj.dirty = true; render(); } });
